@@ -1,0 +1,35 @@
+# Secrets: never commit API keys. .env.example is the template to copy.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.claude/settings.local.json
+
+# Python
+eval_env/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Videos and results: keep only the sample and its ready-made Korean dub (the free demo needs both).
+data/input/*
+!data/input/sample_original.mp4
+data/output/*
+!data/output/sample_dubbed_ko.mp4
+*.dubresume.json
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

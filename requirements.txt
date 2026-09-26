@@ -1,0 +1,11 @@
+# Pinned to the versions verified with Python 3.14 on macOS (arm64).
+streamlit==1.64.0
+openai-whisper==20250625
+librosa==0.11.0
+jiwer==4.0.0
+mediapipe==0.10.35            # brings opencv-contrib-python (provides cv2); don't add opencv-python too
+numpy==2.5.3
+pandas==2.3.3
+imageio-ffmpeg==0.6.0
+python-dotenv==1.2.3
+requests==2.34.2

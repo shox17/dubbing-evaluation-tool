@@ -1,0 +1,60 @@
+# Theme for Dubbing QA Studio: neutral zinc base with one indigo accent.
+# Light and dark are both defined so people can switch in the app menu.
+
+[theme]
+font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+codeFontSize = "0.85rem"
+baseFontSize = 15
+headingFontSizes = ["34px", "26px", "20px", "17px", "15px", "14px"]
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#4F46E5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F7FB"
+codeBackgroundColor = "#F1F1F6"
+textColor = "#18181B"
+borderColor = "#E4E4EC"
+dataframeBorderColor = "#E4E4EC"
+dataframeHeaderBackgroundColor = "#F7F7FB"
+greenColor = "#16A34A"
+orangeColor = "#D97706"
+redColor = "#DC2626"
+blueColor = "#4F46E5"
+violetColor = "#7C3AED"
+grayColor = "#71717A"
+# First two series are "Original" (zinc) and "Dubbed" (indigo).
+chartCategoricalColors = ["#A1A1AA", "#4F46E5", "#16A34A", "#D97706", "#DC2626", "#7C3AED"]
+
+[theme.light.sidebar]
+backgroundColor = "#FAFAFC"
+secondaryBackgroundColor = "#F1F1F6"
+borderColor = "#E4E4EC"
+
+[theme.dark]
+primaryColor = "#6366F1"
+backgroundColor = "#0B0B12"
+secondaryBackgroundColor = "#15151F"
+codeBackgroundColor = "#1C1C28"
+textColor = "#EDEDF3"
+borderColor = "#27273A"
+dataframeBorderColor = "#27273A"
+dataframeHeaderBackgroundColor = "#15151F"
+greenColor = "#4ADE80"
+orangeColor = "#FBBF24"
+redColor = "#F87171"
+blueColor = "#818CF8"
+violetColor = "#A78BFA"
+grayColor = "#A1A1AA"
+chartCategoricalColors = ["#71717A", "#818CF8", "#4ADE80", "#FBBF24", "#F87171", "#A78BFA"]
+
+[theme.dark.sidebar]
+backgroundColor = "#101018"
+secondaryBackgroundColor = "#1C1C28"
+borderColor = "#27273A"
