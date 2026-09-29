@@ -1,10 +1,10 @@
 """Dubbing QA Studio: the Streamlit UI.
 
-Three pages, picked by the router at the bottom: setup (choose video and options), progress (a background
-job is running) and results. All dubbing and measuring happens in src/; this file only shows it.
+Three pages, picked by the router at the bottom: setup (paste a Perso share link), progress (a background job is
+running) and results (the report). All fetching, measuring and report building happens in src/; this file only
+shows it.
 """
 import os
-import re
 import html
 import json
 import math
@@ -15,39 +15,31 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from src.evaluate import CER_LANGS, DEFAULT_WHISPER_MODEL, whisper_language
+from src.evaluate import CER_LANGS, SCHEMA_VERSION
 from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
-from src import i18n
+from src import i18n, perso_api
 from src.jobs import get_job, start_job
-from src.languages import FALLBACK_LANGUAGES
-from src.perso_api import PersoClient, PersoError
-from src.pipeline import (
-    INPUT_DIR, SAMPLE_ORIGINAL, get_default_ground_truth, is_sample_input, load_results,
-    pipeline_stages, probe_video, run_pipeline,
-)
+from src.perso_api import PersoError, media_url, parse_share_url
+from src.pipeline import load_results, run_share_evaluation, share_stages
+from src.report import build_report, fmt_time, render_html
+from src.translation_judge import judge_provider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 st.set_page_config(page_title="Dubbing QA Studio", page_icon=":material/movie:", layout="wide")
 
-UPLOAD_DIR = os.path.join(INPUT_DIR, "uploads")
-RESULTS_SCHEMA_VERSION = 3
-WHISPER_MODELS = list(dict.fromkeys(["tiny", "base", "small", "medium", DEFAULT_WHISPER_MODEL]))
+RESULTS_SCHEMA_VERSION = 6
+assert RESULTS_SCHEMA_VERSION == SCHEMA_VERSION, "bump RESULTS_SCHEMA_VERSION together with evaluate.SCHEMA_VERSION"
 # Widget values that must survive while the setup form is hidden (progress/results views).
-FORM_KEYS = ["ui_lang", "video_source", "target_language", "lip_dubbing", "use_demo", "target_script", "whisper_model",
-             "space_seq"]
+FORM_KEYS = ["ui_lang", "share_url"]
 
 for k in FORM_KEYS:
     if k in st.session_state:
         st.session_state[k] = st.session_state[k]
-if st.session_state.get("video_source") not in (None, "sample", "upload"):
-    st.session_state.video_source = "sample"  # older sessions stored the English label
-for k, v in {"video_source": "sample", "target_language": "ko", "lip_dubbing": True,
-             "use_demo": False, "target_script": "", "whisper_model": DEFAULT_WHISPER_MODEL}.items():
+for k, v in {"share_url": "",
+             "seek": 0}.items():
     st.session_state.setdefault(k, v)
 st.session_state.setdefault("ui_lang", pick_ui_language(st.context.locale))
-st.session_state.setdefault("uploaded_path", None)
-st.session_state.setdefault("uploaded_id", None)
 
 
 # ---------------- helpers ----------------
@@ -56,77 +48,33 @@ def t(key: str, /, **values) -> str:
     return i18n.t(key, st.session_state.ui_lang, **values)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def perso_account() -> dict:
-    """Workspaces with plan and credits, or an error message."""
+@st.cache_data(ttl=300, show_spinner=False)
+def shared_project(token: str) -> dict:
+    """The project behind a share token (cached 5 min), or {"error": message}."""
     try:
-        client = PersoClient()
-        spaces = []
-        for s in client.list_spaces():
-            seq = s["spaceSeq"]
-            try:
-                status = client.plan_status(seq)
-            except PersoError:
-                status = {}
-            spaces.append({
-                "seq": seq,
-                "name": s.get("spaceName") or f"Workspace {seq}",
-                "plan": s.get("planName") or status.get("planTier") or "?",
-                "tier": (status.get("planTier") or s.get("tier") or "").lower(),
-                "credits": (status.get("remainingQuota") or {}).get("remainingQuota"),
-                "default": bool(s.get("isDefaultSpaceOwned")),
-            })
-        if not spaces:
-            return {"error_key": "account.no_workspace"}
-        return {"spaces": spaces}
+        return perso_api.get_shared_project(token)
     except PersoError as e:
         return {"error": str(e)}
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def perso_languages() -> list[dict]:
-    """Every language Perso can dub into, by name. Falls back to the bundled list when Perso can't be reached."""
-    try:
-        languages = PersoClient().list_languages()
-    except PersoError:
-        languages = []
-    return sorted(languages or FALLBACK_LANGUAGES, key=lambda l: l["name"])
-
-
-def language_name(lang_id: str) -> str:
-    """Display name for a language id (en-GB -> English (UK)); the id itself if unknown."""
-    return next((l["name"] for l in perso_languages() if l["id"] == lang_id), lang_id)
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def credit_estimate(space_seq: int, duration_ms: int, width: int, height: int, lip_sync: bool) -> Optional[float]:
-    """Perso's credit estimate for a video, cached for 5 minutes; None if Perso can't say."""
-    try:
-        return PersoClient().estimate_credits(space_seq, duration_ms, width, height, lip_sync)
-    except PersoError:
-        return None
-
-
-@st.cache_data(show_spinner=False)
-def video_info(path: str, mtime: float) -> Optional[dict]:
-    """Duration, size and resolution of a video, or None if it can't be read. mtime busts the cache."""
-    try:
-        return probe_video(path)
-    except ValueError:
-        return None
-
-
-def persist_upload(uploaded) -> str:
-    """Saves an upload once per file (Streamlit reruns the script on every interaction)."""
-    if st.session_state.uploaded_id != uploaded.file_id:
-        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(uploaded.name)) or "video.mp4"
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        path = os.path.join(UPLOAD_DIR, f"{uploaded.file_id[:8]}_{safe_name}")
-        with open(path, "wb") as f:
-            f.write(uploaded.getbuffer())
-        st.session_state.uploaded_path = path
-        st.session_state.uploaded_id = uploaded.file_id
-    return st.session_state.uploaded_path
+def project_info(project: dict) -> str:
+    """What the share link contains, as a short markdown list: languages, length, lip-sync, videos, date, owner."""
+    src, tgt = project.get("sourceLanguage") or {}, project.get("targetLanguage") or {}
+    lip = bool(project.get("isLipSync") and project.get("lipSyncFileUrl"))
+    videos = [t("share.video_original")] if project.get("originalFileUrl") else []
+    videos += [t("share.video_dubbed")] if project.get("translatedFileUrl") else []
+    videos += [t("share.video_lipsync")] if project.get("lipSyncFileUrl") else []
+    rows = [(t("share.info_languages"), f"{src.get('name', '?')} → {tgt.get('name', '?')}"),
+            (t("share.info_length"), f"{(project.get('durationMs') or 0) / 1000:.1f} s"),
+            (t("share.info_lipsync"), t("share.yes") if lip else t("share.no")),
+            (t("share.info_videos"), ", ".join(videos))]
+    if project.get("createDate"):
+        rows.append((t("share.info_created"), project["createDate"][:16].replace("T", " ")))
+    if project.get("userName"):
+        rows.append((t("share.info_owner"), project["userName"]))
+    if project.get("seq"):
+        rows.append((t("share.info_project"), f"#{project['seq']}"))
+    return "\n".join(f"- **{label}:** {html.escape(str(value))}" for label, value in rows)
 
 
 def fmt(value, pattern: str, na: str = "—") -> str:
@@ -147,8 +95,9 @@ def to_db(rms: Optional[float]) -> Optional[float]:
 
 def badge(level: str) -> str:
     """Coloured Good / Check / Poor / Experimental / Not scored badge for a score card."""
+    level = "na" if level == "not_measured" else level
     style = {"good": "green-badge[:material/check_circle: ", "check": "orange-badge[:material/error: ",
-             "poor": "red-badge[:material/cancel: ", "info": "violet-badge[:material/science: ", "na": "gray-badge["}
+             "poor": "red-badge[:material/cancel: ", "info": "violet-badge[:material/info: ", "na": "gray-badge["}
     return f":{style[level]}{t('badge.' + level)}]"
 
 
@@ -190,34 +139,6 @@ with st.sidebar:
                  format_func=UI_LANGUAGES.get)
     st.caption(t("app.tagline"))
 
-    st.subheader(t("account.title"), icon=":material/account_circle:")
-    account = perso_account()
-    selected_space = None
-    if "error" in account or "error_key" in account:
-        st.error(t(account["error_key"]) if "error_key" in account else account["error"], icon=":material/link_off:")
-        st.caption(t("account.demo_hint"))
-    else:
-        spaces = account["spaces"]
-        if len(spaces) > 1:
-            if st.session_state.get("space_seq") not in [s["seq"] for s in spaces]:
-                st.session_state.space_seq = next((s["seq"] for s in spaces if s["default"]), spaces[0]["seq"])
-            st.selectbox(t("account.workspace"), options=[s["seq"] for s in spaces], key="space_seq",
-                         format_func=lambda seq: next(s["name"] for s in spaces if s["seq"] == seq))
-            selected_space = next(s for s in spaces if s["seq"] == st.session_state.space_seq)
-        else:
-            selected_space = spaces[0]
-        st.markdown(f":green-badge[:material/check_circle: {t('account.connected')}] **{selected_space['name']}**")
-        with st.container(horizontal=True):
-            st.metric(t("account.plan"), str(selected_space["plan"]).title(), border=True)
-            st.metric(t("account.credits_left"), fmt(selected_space["credits"], "{:,.0f}"), border=True,
-                      help=t("account.credits_help"))
-        st.button(t("account.refresh"), icon=":material/refresh:", type="tertiary", on_click=perso_account.clear)
-        if selected_space["tier"] == "free":
-            st.warning(t("account.free_plan"), icon=":material/warning:")
-
-    with st.expander(t("settings.title"), icon=":material/tune:"):
-        st.selectbox(t("settings.whisper"), WHISPER_MODELS, key="whisper_model", help=t("settings.whisper_help"))
-
     with st.expander(t("how.title"), icon=":material/help:"):
         st.markdown(t("how.body"))
 
@@ -228,11 +149,9 @@ with st.sidebar:
 
 # ---------------- progress view ----------------
 def render_progress(job):
-    """Progress page for a running job: overall %, time left and a live stage checklist."""
+    """Progress page for a running job: overall %, elapsed time and a live stage checklist."""
     st.title(t("progress.title"), icon=":material/hourglass_top:")
-    p = job.params
-    st.caption(f"{os.path.basename(p['input_video_path'])} → **{language_name(p['target_language'])}**"
-               + (t("progress.with_lipsync") if p["lip_dubbing"] and not p["use_demo_mode"] else ""))
+    st.caption(html.escape(job.params.get("title") or job.params["share_url"]))
 
     @st.fragment(run_every=2)
     def live():
@@ -243,8 +162,6 @@ def render_progress(job):
         with st.container(horizontal=True):
             st.metric(t("progress.overall"), f"{pct * 100:.0f}%", border=True)
             st.metric(t("progress.elapsed"), fmt_minutes(job.elapsed_sec), border=True)
-            st.metric(t("progress.time_left"), t("progress.about_min", n=f"{job.eta_minutes:.0f}")
-                      if job.eta_minutes else "—", border=True)
         st.progress(pct)
 
         with st.container(border=True, gap="small"):
@@ -255,101 +172,136 @@ def render_progress(job):
                 title = t(f"stage.{key}")
                 if state == "active":
                     detail = translate_message(job.message, st.session_state.ui_lang)
-                    if key in ("dubbing", "lipsync"):
-                        detail += f" · {job.stage_fraction * 100:.0f}%"
-                    if job.eta_minutes:
-                        detail += " · " + t("progress.about_min_left", n=f"{job.eta_minutes:.0f}")
                     st.markdown(f"{icon} **{title}**  \n:gray[{html.escape(detail)}]")
                 else:
                     st.markdown(f"{icon} {title}" if state != "pending" else f"{icon} :gray[{title}]")
 
-        if job.stage == "lipsync":
-            st.info(t("progress.lipsync_info"), icon=":material/face_retouching_natural:")
-
     live()
-    st.caption(t("progress.leave_hint"))
     if st.button(t("progress.stop"), icon=":material/stop_circle:", help=t("progress.stop_help")):
         job.cancel_event.set()
         st.toast(t("progress.stopping"))
 
 
 # ---------------- results view ----------------
+def seek_to(sec: Optional[float]):
+    """Starts both videos from sec (button callback for a thing to check)."""
+    st.session_state.seek = max(0, int(sec or 0))
+
+
+def speech_timeline(ta: dict):
+    """Chart of when the original and the dub speak, with mismatches outlined in red."""
+    rows = [{"track": t("results.original"), "start": a, "end": b} for a, b in ta.get("original_speech", [])]
+    rows += [{"track": t("results.dubbed"), "start": a, "end": b} for a, b in ta.get("dubbed_speech", [])]
+    if not rows:
+        return
+    marks = [{"start": m["start"], "end": m["end"]} for m in ta.get("mismatches", [])]
+    order = [t("results.original"), t("results.dubbed")]
+    st.markdown(f"**:material/timeline: {t('report.timeline_title')}**")
+    marks_layer = {"data": {"values": marks},
+                   "mark": {"type": "rect", "filled": False, "stroke": "#e5484d", "strokeWidth": 2},
+                   "encoding": {"x": {"field": "start", "type": "quantitative"}, "x2": {"field": "end"},
+                                "y": {"value": 0}, "y2": {"value": {"expr": "height"}}}}
+    st.vega_lite_chart({
+        "layer": [
+            {"data": {"values": rows}, "mark": {"type": "bar", "cornerRadius": 2},
+             "encoding": {"y": {"field": "track", "type": "nominal", "sort": order, "title": None,
+                                "scale": {"paddingInner": 0.35}},
+                          "x": {"field": "start", "type": "quantitative", "title": t("chart.seconds")},
+                          "x2": {"field": "end"},
+                          "color": {"field": "track", "type": "nominal", "sort": order, "legend": None},
+                          "tooltip": [{"field": "track"}, {"field": "start", "title": "from (s)"},
+                                      {"field": "end", "title": "to (s)"}]}},
+        ] + ([marks_layer] if marks else []),
+    }, width="stretch", height=120)
+    st.caption(t("report.timeline_caption"))
+
+
+def render_report(rep: dict, r: dict):
+    """The verdict, every report section with its badges, and the timestamped things to check."""
+    o = rep["overall"]
+    c = o["counts"]
+    with st.container(border=True):
+        icon = {"good": ":green[:material/verified:]", "check": ":orange[:material/rule:]",
+                "poor": ":red[:material/report:]"}[o["level"]]
+        st.markdown(f"### {icon} {t('verdict.' + o['level'])}")
+        st.markdown(o["headline"])
+        st.caption(t("verdict.counts", good=c["good"], check=c["check"], poor=c["poor"], na=c["not_measured"])
+                   + " · " + t("verdict.rule"))
+
+    for i, sec in enumerate(rep["sections"], 1):
+        with st.container(border=True):
+            st.markdown(f"**{i}. {sec['title']}**")
+            for m in sec["metrics"]:
+                c1, c2, c3 = st.columns([2, 2.2, 5.8], vertical_alignment="top")
+                c1.markdown(f"**{m['label']}**")
+                c2.markdown(badge(m["level"]) + ("" if m["value"] is None else f"  \n`{m['display']}`"))
+                c3.markdown(html.escape(m["message"]))
+                if m.get("thresholds"):
+                    c3.caption(m["thresholds"])
+            if sec["id"] == "alignment":
+                speech_timeline(r.get("timing_alignment") or {})
+            if sec.get("note"):
+                st.caption(f":material/info: {sec['note']}")
+
+    st.subheader(t("results.things_to_check"), icon=":material/checklist:")
+    with st.container(border=True):
+        if not rep["things_to_check"]:
+            st.caption(t("report.no_things"))
+        for n, item in enumerate(rep["things_to_check"]):
+            c1, c2 = st.columns([2, 8], vertical_alignment="center")
+            if item["start"] is not None:
+                c1.button(fmt_time(item["start"]), key=f"seek_{n}", icon=":material/play_arrow:", type="tertiary",
+                          help=t("report.jump_help"), on_click=seek_to, args=(item["start"],))
+            until = f" :gray[(→ {fmt_time(item['end'])})]" if item.get("end") is not None else ""
+            color = "red" if item["severity"] == "poor" else "orange"
+            c2.markdown(f":{color}-badge[{html.escape(item['category'])}] {html.escape(item['message'])}{until}")
+    if rep["not_measured"]:
+        st.caption(f"**{t('report.not_measured')}:** " + " · ".join(
+            f"{html.escape(x['label'])}: {html.escape(x['reason'])}" for x in rep["not_measured"]))
+
+
 def render_results(r: dict):
-    """Results page: both videos, headline scores, comparison table, loudness chart and script diff."""
+    """Results page: the report (verdict, sections, things to check), both videos, then detailed measurements."""
     p, ac, sr, ls = r.get("pipeline", {}), r["acoustic_metrics"], r["speech_recognition"], r["lipsync_metrics"]
+    # Rebuilt on every run so the page follows the interface language and the current report rules.
+    rep = build_report(r, st.session_state.ui_lang)
+    proj = rep["project"]
     lang = p.get("target_language_code", "ko")
     by_char = lang in CER_LANGS
 
-    with st.container(horizontal=True, vertical_alignment="bottom"):
-        with st.container(gap="xsmall"):
-            st.title(t("results.title"), icon=":material/analytics:")
-            st.markdown(f":gray[{html.escape(os.path.basename(p.get('input_video_path', '')))}] "
-                        f":material/arrow_forward: :blue-badge[:material/translate: {p.get('target_language_name')}] "
-                        f":gray-badge[{p.get('execution_mode')}] :gray[{p.get('timestamp', '')}]")
+    st.title(t("results.title"), icon=":material/analytics:")
+    langs = f"{proj.get('source_language') or '?'} :material/arrow_forward: {proj.get('target_language') or '?'}"
+    st.markdown(f":gray[{html.escape(proj.get('title') or '')}] :blue-badge[:material/translate: {langs}] "
+                f":gray-badge[{p.get('execution_mode')}] :gray[{p.get('timestamp', '')}]"
+                + (f" [{t('report.open_perso')}]({proj['share_url']})" if proj.get("share_url") else ""))
+    with st.container(horizontal=True):
+        st.download_button(t("report.download_html"), render_html(rep, r), file_name=f"dubbing_qa_{p.get('run_id', 'report')}.html",
+                           mime="text/html", icon=":material/description:", help=t("report.download_html_help"))
         st.download_button(t("results.download"), json.dumps(r, ensure_ascii=False, indent=2),
                            file_name=f"dubbing_qa_{p.get('run_id', 'result')}.json", mime="application/json",
                            icon=":material/download:", help=t("results.download_help"))
         st.button(t("results.new"), type="primary", icon=":material/add:", on_click=new_evaluation)
 
-    if r.get("warnings"):
-        st.warning(f"**{t('results.things_to_check')}**\n\n" + "\n".join(f"- {w}" for w in r["warnings"]), icon=":material/warning:")
-
     v1, v2 = st.columns(2)
+    start = st.session_state.get("seek", 0)
     with v1.container(border=True):
         st.markdown(f"**{t('results.original')}**")
         if os.path.exists(p.get("input_video_path", "")):
-            st.video(p["input_video_path"])
+            st.video(p["input_video_path"], start_time=start)
     with v2.container(border=True):
         st.markdown(f"**{t('results.dubbed')}** :blue-badge[{p.get('target_language_name')}]")
         if os.path.exists(p.get("dubbed_video_path", "")):
-            st.video(p["dubbed_video_path"])
+            st.video(p["dubbed_video_path"], start_time=start)
         else:
             st.warning(t("results.video_gone"), icon=":material/videocam_off:")
 
-    # ----- headline scores -----
-    st.subheader(t("results.at_a_glance"), icon=":material/speed:")
-    k1, k2, k3, k4 = st.columns(4)
+    render_report(rep, r)
 
+    # ----- detailed measurements -----
+    st.subheader(t("report.details"), icon=":material/table_chart:")
+    st.markdown(f"**:material/compare: {t('table.title')}**")
     od, dd = ac["original_duration_sec"], ac["dubbed_duration_sec"]
-    rel = abs(dd - od) / od if od else 1
-    with k1.container(border=True, height="stretch"):
-        st.markdown(f"**{t('card.timing')}** {badge('good' if rel <= .05 else 'check' if rel <= .15 else 'poor')}")
-        st.metric(t("card.timing"), f"{ac['duration_diff_sec']:+.2f} s", label_visibility="collapsed")
-        st.caption(t("card.timing_caption", dub=f"{dd:.1f}", orig=f"{od:.1f}"))
-
     acc = sr.get("accuracy_pct")
-    with k2.container(border=True, height="stretch"):
-        # Wording differences between translations count as errors here, so the bands are lenient.
-        level = "na" if acc is None else "good" if acc >= 80 else "check" if acc >= 50 else "poor"
-        st.markdown(f"**{t('card.script')}** {badge(level)}")
-        st.metric(t("card.script"), fmt(acc, "{:.0f}%"), label_visibility="collapsed")
-        st.caption(t("card.script_caption") if acc is not None else t("card.script_none"))
-
-    vp = sr.get("vs_perso_script")
-    with k3.container(border=True, height="stretch"):
-        if vp:
-            a = vp["accuracy_pct"]
-            st.markdown(f"**{t('card.clarity')}** {badge('good' if a >= 80 else 'check' if a >= 50 else 'poor')}")
-            st.metric(t("card.clarity"), f"{a:.0f}%", label_visibility="collapsed")
-            st.caption(t("card.clarity_caption"))
-        else:
-            db = to_db(ac.get("rms_ratio"))
-            level = "na" if db is None else "good" if abs(db) <= 2 else "check" if abs(db) <= 4 else "poor"
-            st.markdown(f"**{t('card.loudness')}** {badge(level)}")
-            st.metric(t("card.loudness"), fmt(db, "{:+.1f} dB"), label_visibility="collapsed")
-            st.caption(t("card.loudness_caption"))
-
-    with k4.container(border=True, height="stretch"):
-        st.markdown(f"**{t('card.lips')}** {badge('info')}")
-        if ls.get("valid"):
-            st.metric(t("card.lips"), f"{ls['pearson_correlation']:+.2f}", label_visibility="collapsed")
-            st.caption(t("card.lips_caption", r=fmt(ls.get("original_pearson"), "{:+.2f}")))
-        else:
-            st.metric(t("card.lips"), "—", label_visibility="collapsed")
-            st.caption(ls.get("reason") or t("card.lips_na"))
-
-    # ----- comparison table -----
-    st.subheader(t("table.title"), icon=":material/compare:")
     osr, dsr = sr.get("original_speech_rate"), sr.get("dubbed_speech_rate")
     rate = lambda x: fmt(x and x["value"], "{:.2f}") + (f" {t('unit.' + x['unit'])}" if x else "")
     pts = t("unit.pts")
@@ -392,29 +344,22 @@ def render_results(r: dict):
         st.caption(t("chart.loudness_caption"))
 
     # ----- scripts -----
-    st.subheader(t("said.title"), icon=":material/record_voice_over:")
-    tabs = st.tabs([f":material/difference: {t('said.tab_script')}", f":material/translate: {t('said.tab_perso')}",
-                    f":material/mic: {t('said.tab_original')}"])
+    st.markdown(f"**:material/record_voice_over: {t('said.title')}**")
+    # A script only exists when the run came from the CLI with --script; then the diff tab is added.
+    has_script = bool(sr.get("ground_truth"))
+    names = [f":material/record_voice_over: {t('said.tab_dub')}", f":material/mic: {t('said.tab_original')}"]
+    tabs = st.tabs(names + ([f":material/difference: {t('said.tab_script')}"] if has_script else []))
     with tabs[0]:
-        if sr.get("ground_truth"):
+        st.write(sr.get("dubbed_transcript") or "—")
+    with tabs[1]:
+        st.caption(t("said.detected", lang=r.get("metadata", {}).get("detected_source_language", "?")))
+        st.write(sr.get("original_transcript") or "—")
+    if has_script:
+        with tabs[2]:
             metric = (sr.get("primary_metric") or "wer").upper()
             st.caption(t("said.legend", acc=fmt(acc, "{:.0f}%"), metric=metric, err=fmt(sr.get("error_rate"), "{:.3f}")))
             st.markdown(diff_html(sr["ground_truth"], sr["dubbed_transcript"], by_char), unsafe_allow_html=True)
             st.caption(t("said.diff_note"))
-        else:
-            st.caption(t("said.no_script"))
-            st.markdown(f"**{t('said.heard')}** {sr.get('dubbed_transcript') or '—'}")
-    with tabs[1]:
-        if sr.get("perso_translation"):
-            st.write(sr["perso_translation"])
-            tvt = sr.get("perso_translation_vs_target")
-            if tvt:
-                st.caption(t("said.perso_match", pct=f"{tvt['accuracy_pct']:.0f}"))
-        else:
-            st.caption(t("said.perso_live_only"))
-    with tabs[2]:
-        st.caption(t("said.detected", lang=r.get("metadata", {}).get("detected_source_language", "?")))
-        st.write(sr.get("original_transcript") or "—")
 
     wave = ls.get("waveform_data") or {}
     if ls.get("valid") and wave.get("timestamps"):
@@ -427,115 +372,44 @@ def render_results(r: dict):
 
 # ---------------- setup view ----------------
 def render_setup():
-    """Setup page: choose a video, language and options, paste the script, then start a run."""
+    """Setup page: paste the link, preview the project, choose options, evaluate."""
     st.title(t("setup.title"), icon=":material/movie_edit:")
     st.markdown(f":gray[{t('setup.intro')}]")
-
-    # Step 1
+    project, token = None, None
     with st.container(border=True):
-        st.subheader(t("step1.title"), icon=":material/video_library:")
-        source = st.segmented_control(
-            t("upload.label"), ["sample", "upload"], key="video_source", required=True, label_visibility="collapsed",
-            format_func=lambda o: {"sample": ":material/smart_display: ", "upload": ":material/upload: "}[o]
-            + t(f"source.{o}"))
-        video_path = None
-        if source == "upload":
-            up = st.file_uploader(t("upload.label"), type=["mp4", "mov", "webm"], help=t("upload.help"))
-            if up is not None:
-                video_path = persist_upload(up)
-            elif st.session_state.uploaded_path and os.path.exists(st.session_state.uploaded_path):
-                video_path = st.session_state.uploaded_path
-                st.caption(t("upload.earlier", name=os.path.basename(video_path)))
-        else:
-            video_path = SAMPLE_ORIGINAL
-
-        info = video_info(video_path, os.path.getmtime(video_path)) if video_path and os.path.exists(video_path) else None
-        if video_path and info:
+        st.subheader(t("share.title"), icon=":material/link:")
+        st.caption(t("share.caption"))
+        st.text_input(t("share.label"), key="share_url", placeholder=t("share.placeholder"), label_visibility="collapsed")
+        if st.session_state.share_url.strip():
+            try:
+                token = parse_share_url(st.session_state.share_url)
+            except ValueError as e:
+                st.error(translate_message(str(e), st.session_state.ui_lang), icon=":material/link_off:")
+        if token:
+            with st.spinner():
+                project = shared_project(token)
+            if "error" in project:
+                st.error(translate_message(project["error"], st.session_state.ui_lang), icon=":material/error:")
+                project = None
+        if project:
             c1, c2 = st.columns([2, 3])
-            c1.video(video_path)
-            c2.markdown(f"**{html.escape(os.path.basename(video_path))}**")
-            c2.markdown(f":gray-badge[:material/schedule: {info['duration_ms'] / 1000:.1f} s] "
-                        f":gray-badge[:material/aspect_ratio: {info['width']}×{info['height']}] "
-                        f":gray-badge[:material/folder: {info['size'] / 1e6:.1f} MB]")
-            if source == "sample":
-                c2.caption(t("sample.caption"))
-        elif video_path:
-            st.error(t("video.unreadable"), icon=":material/error:")
+            if project.get("thumbnailUrl"):
+                c1.image(media_url(project["thumbnailUrl"]))
+            c2.markdown(f"**{html.escape(project.get('title') or '')}**")
+            c2.markdown(project_info(project))
+            if not judge_provider():
+                c2.caption(f":orange[:material/key_off:] {t('share.judge_missing')}")
 
-    # Step 2
-    with st.container(border=True):
-        st.subheader(t("step2.title"), icon=":material/tune:")
-        c1, c2 = st.columns(2)
-        languages = perso_languages()
-        if st.session_state.target_language not in [l["id"] for l in languages]:
-            st.session_state.target_language = "ko"
-        c1.selectbox(t("dub_into"), [l["id"] for l in languages], key="target_language",
-                     format_func=lambda i: next(l["name"] + (t("experimental_suffix") if l["experimental"] else "")
-                                                for l in languages if l["id"] == i),
-                     help=t("dub_into_help", n=len(languages)))
-        target = next(l for l in languages if l["id"] == st.session_state.target_language)
-        if not whisper_language(target["code"]):
-            c1.caption(f":orange[:material/warning:] {t('no_whisper', lang=target['name'])}")
-        c2.toggle(t("lipsync.toggle"), key="lip_dubbing", help=t("lipsync.help"))
-        demo_ok = bool(video_path) and is_sample_input(video_path) and st.session_state.target_language == "ko"
-        if demo_ok:
-            st.toggle(t("demo.toggle"), key="use_demo", help=t("demo.help"))
-        use_demo = demo_ok and st.session_state.get("use_demo", False)
-
-        estimate = None
-        if use_demo:
-            st.success(t("cost.free"), icon=":material/redeem:")
-        elif selected_space and info:
-            estimate = credit_estimate(selected_space["seq"], info["duration_ms"], info["width"], info["height"],
-                                       st.session_state.lip_dubbing)
-            credits = selected_space["credits"]
-            if estimate is not None:
-                enough = credits is None or credits >= estimate
-                (st.info if enough else st.error)(
-                    t("cost.estimate", est=f"{estimate:,.0f}", have=fmt(credits, "{:,.0f}"))
-                    + ("" if enough else t("cost.not_enough")),
-                    icon=":material/toll:")
-
-    # Step 3
-    with st.container(border=True):
-        lang_name = target["name"]
-        st.subheader(t("step3.title"), icon=":material/description:")
-        st.caption(t("step3.caption", lang=lang_name))
-        if use_demo:
-            st.button(t("script.paste_sample"), icon=":material/content_paste:", on_click=lambda: st.session_state.update(
-                target_script=get_default_ground_truth("ko")))
-        st.text_area(t("step3.title"), key="target_script", height=160, label_visibility="collapsed",
-                     placeholder=t("script.placeholder", lang=lang_name))
-
-    # Start
-    problems = []
-    if not video_path or not info:
-        problems.append(t("problem.video"))
-    if not use_demo:
-        if selected_space is None:
-            problems.append(t("problem.account"))
-        elif selected_space["tier"] == "free":
-            problems.append(t("problem.free"))
-        elif estimate is not None and selected_space["credits"] is not None and selected_space["credits"] < estimate:
-            problems.append(t("problem.credits"))
-    for msg in problems:
-        st.warning(msg, icon=":material/info:")
-
-    label = (t("start.demo") if use_demo else
-             t("start.dub_cost", est=f"{estimate:,.0f}") if estimate is not None else t("start.dub"))
-    if st.button(label, key="start", type="primary", icon=":material/play_arrow:", disabled=bool(problems),
-                 width="stretch"):
+    if not project:
+        st.warning(t("problem.share"), icon=":material/info:")
+    if st.button(t("share.start"), key="start", type="primary", icon=":material/play_arrow:",
+                 disabled=project is None, width="stretch"):
         params = dict(
-            input_video_path=video_path,
-            target_language=st.session_state.target_language,
-            lip_dubbing=st.session_state.lip_dubbing,
-            use_demo_mode=use_demo,
-            ground_truth_text=st.session_state.get("target_script", ""),
-            space_seq=selected_space["seq"] if selected_space else None,
-            whisper_model_name=st.session_state.get("whisper_model", DEFAULT_WHISPER_MODEL),
+            share_url=st.session_state.share_url.strip(),
+            report_lang=st.session_state.ui_lang,
         )
-        job = start_job(lambda report, cancel: run_pipeline(**params, report=report, cancel_event=cancel),
-                        params, pipeline_stages(use_demo, params["lip_dubbing"]))
+        job = start_job(lambda report, cancel: run_share_evaluation(**params, report=report, cancel_event=cancel),
+                        {**params, "title": project.get("title")}, share_stages())
         st.query_params["job"] = job.id
         st.rerun()
 
@@ -545,19 +419,15 @@ job = get_job(st.query_params.get("job"))
 if job is not None and job.status == "running":
     render_progress(job)
 elif job is not None and job.status == "done":
-    perso_account.clear()  # the run spent credits
     open_results(job.result)
     st.rerun()
 elif job is not None:
     cancelled = job.status == "cancelled"
     st.title(t("stopped.title") if cancelled else t("failed.title"),
              icon=":material/stop_circle:" if cancelled else ":material/error:")
-    (st.info if cancelled else st.error)(job.error)
+    (st.info if cancelled else st.error)(translate_message(job.error or "", st.session_state.ui_lang))
     st.caption(t("stopped.during", stage=t(f"stage.{job.stage}") if f"stage.{job.stage}" in i18n.TEXT else job.stage,
                  time=fmt_minutes(job.elapsed_sec)))
-    if job.perso_projects:
-        st.caption(t("stopped.projects") + ", ".join(
-            f"[{seq}](https://perso.ai/en/workspace/vt/detail/{seq})" for seq in job.perso_projects))
     st.button(t("back"), type="primary", icon=":material/arrow_back:", on_click=new_evaluation)
 elif st.query_params.get("job"):
     st.warning(t("untracked"), icon=":material/sync_problem:")

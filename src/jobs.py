@@ -1,5 +1,5 @@
-"""Background jobs: a dubbing + evaluation run executes in a thread so the UI can show live progress,
-survive page reloads (the job id is kept in the URL) and let the user stop waiting."""
+"""Background jobs: a share-link evaluation runs in a thread so the UI can show live progress, survive page
+reloads (the job id is kept in the URL) and let the user stop it."""
 import time
 import uuid
 import logging
@@ -11,13 +11,15 @@ log = logging.getLogger(__name__)
 
 # Ordered stages shown in the UI checklist.
 STAGES = [
-    ("upload", "Upload video to Perso"),
-    ("dubbing", "Dub the voice"),
-    ("lipsync", "Lip-sync the video"),
-    ("download", "Download the dubbed video"),
+    ("fetch", "Read the Perso share link"),
+    ("download", "Download both videos"),
     ("evaluate", "Measure quality"),
 ]
 STAGE_KEYS = [k for k, _ in STAGES]
+
+
+class Cancelled(RuntimeError):
+    """The user stopped a job."""
 
 
 @dataclass
@@ -26,13 +28,11 @@ class Progress:
     stage: str                       # one of STAGE_KEYS
     message: str                     # what is happening, in plain words
     stage_fraction: float = 0.0      # 0..1 within the stage
-    eta_minutes: Optional[float] = None
-    perso_project: Optional[int] = None
 
 
 @dataclass
 class Job:
-    """One background dubbing run: its status, current stage, progress and, when finished, result or error."""
+    """One background evaluation: its status, current stage, progress and, when finished, result or error."""
     id: str
     params: dict
     stages: list[str]                               # the stages this job goes through
@@ -40,8 +40,6 @@ class Job:
     stage: str = ""
     message: str = "Starting..."
     stage_fraction: float = 0.0
-    eta_minutes: Optional[float] = None
-    perso_projects: list[int] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     stage_started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
@@ -57,14 +55,11 @@ class Job:
                 self.stage_started_at = time.time()
             self.stage, self.message = p.stage, p.message
             self.stage_fraction = max(0.0, min(1.0, p.stage_fraction))
-            self.eta_minutes = p.eta_minutes
-            if p.perso_project and p.perso_project not in self.perso_projects:
-                self.perso_projects.append(p.perso_project)
 
     @property
     def overall_fraction(self) -> float:
-        """Progress across all stages. Perso stages dominate the wall-clock time, so they weigh more."""
-        weights = {"upload": 1, "dubbing": 4, "lipsync": 6, "download": 1, "evaluate": 2}
+        """Progress across all stages, weighted by their typical share of the run time."""
+        weights = {"fetch": 0.2, "download": 1, "evaluate": 6}
         total = sum(weights[s] for s in self.stages)
         if self.status == "done":
             return 1.0
@@ -114,7 +109,6 @@ def start_job(runner: Callable[[Callable[[Progress], None], threading.Event], di
             job.status = "done"
             job.message = "Finished"
         except Exception as e:  # reported to the UI; the traceback goes to the log
-            from src.perso_api import Cancelled
             if isinstance(e, Cancelled):
                 job.status, job.error = "cancelled", "You stopped this job."
             else:

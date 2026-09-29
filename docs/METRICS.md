@@ -1,22 +1,24 @@
 # Evaluation Metrics
 
 This page explains how each score is produced (`src/evaluate.py`), how to read it, and where it breaks down.
-Reference numbers come from the demo pair: `sample_original.mp4` (English) → `sample_dubbed_ko.mp4` (Korean), Whisper `small`.
+Reference numbers ("Sample") come from a real Perso EN→KO lip-sync dub of a 28.7 s talking-head clip (share project #420891), Whisper `small`. The default model is now `base`, which gave the same verdict and scores on this sample (82% vs 81% speech overlap, 4/5 meaning) with a 3× smaller download.
 
 ## 1. Acoustics (`analyze_acoustics`)
 
 Audio is decoded to 16 kHz mono with the bundled ffmpeg.
 
-| Field | Definition | Read as | Demo |
+| Field | Definition | Read as | Sample |
 |---|---|---|---|
 | `duration_diff_sec` | dubbed − original | ≈ 0 for a time-aligned dub. Beyond ±20%, a warning is raised because the pair probably doesn't match | 0.00 |
 | `rms_ratio` | mean RMS dub ÷ original | ≈ 1.0 means matched loudness. `null` if the original is silent | 1.00 |
 | `*_volume_stability_pct` | `(1 − std/mean RMS)·100` | Higher is steadier. Useful as a comparison, not as an absolute | 60 → 63 |
-| `*_silence_ratio` | 1 − non-silent time ÷ duration (`top_db=20`, relative to the clip's peak) | Music beds hide silence | 0.1% → 1.0% |
+| `*_silence_ratio` | 1 − non-silent time ÷ duration (`top_db=20`, relative to the clip's peak) | Music beds hide silence | 0.1% → 0.6% |
 
-## 2. Speech accuracy (`score_transcript`)
+## 2. Script accuracy (`score_transcript`, only when you give a script)
 
-1. Whisper transcribes the dub with `language=target` (`whisper_language` maps Perso's `fil` → `tl` and `jv` → `jw`). For Cebuano, Chichewa, Irish and Kyrgyz Whisper has no model, so it auto-detects and the run warns that the script scores are rough. The original is transcribed with language auto-detection (`detected_source_language`).
+Share links don't include a script, so this is scored only when you pass one on the command line (`--script` / `--script-file`). It isn't listed as "not measured" otherwise: it's an optional extra, not a gap.
+
+1. Whisper transcribes the dub with `language=target` (`whisper_language` maps Perso's `fil` → `tl` and `jv` → `jw`). For Cebuano, Chichewa, Irish and Kyrgyz Whisper has no model, so it auto-detects and the run warns that the script scores are rough. The original is transcribed in the share project's source language, or with auto-detection when that is unknown (`detected_source_language`).
 2. Both reference and hypothesis are normalized: NFKC, lowercase, punctuation and symbols removed, whitespace collapsed.
 3. `wer` is word-level. `cer` is character-level with spaces removed, so spacing differences are not errors.
 4. **Primary metric:** `cer` for `ko`, `ja`, `zh`, `th`, and `wer` otherwise. `error_rate` and `accuracy_pct = max(0, 1 − error_rate)·100` come from it.
@@ -24,15 +26,12 @@ Audio is decoded to 16 kHz mono with the bundled ffmpeg.
 
 **Why CER for Korean and Japanese:** Japanese has no spaces, so WER treats a whole sentence as a single "word". Korean spacing units are coarse and ASR spacing is inconsistent. For example, `소프트웨어 공학을` vs `소프트웨어공학을` is a 100% word error but a 0% character error.
 
-**Demo:** CER 0.395, WER 0.519. This is **not** a 40% dubbing failure. The number mixes three things:
-- **Paraphrase:** Perso's translation is valid but worded differently from `data/ground_truth.txt` (for example, `공부하고` vs `전공하고`).
+**Reading it:** on a Korean dub of the sample, a correct dub scored about 60% (CER ≈ 0.4) against an independently written Korean script. That is **not** a 40% dubbing failure. The number mixes three things:
+- **Paraphrase:** the dub's translation is valid but worded differently from your script (for example, `공부하고` vs `전공하고`).
 - **ASR error:** Whisper mishears proper nouns (`인하대학교` → `이나데아크`).
 - **Real dubbing errors.**
 
-For a dubbing-quality score, use Perso's own translated script as the ground truth. Then only ASR and pronunciation errors remain. Whisper `small` is noticeably better than `base` on Korean. Use `medium` for reporting (`WHISPER_MODEL=medium`).
-
-### Voice clarity (live runs)
-After dubbing, the app downloads the script Perso actually voiced (`GET …/script`, `translatedText`) and scores the Whisper transcript against it (`vs_perso_script`). Wording differences with your script drop out, so this isolates **how intelligible the synthetic voice is**, plus ASR error. `perso_translation_vs_target` compares Perso's translation with your script directly. It measures wording differences only and doesn't involve audio.
+The highlighted diff under **What was said** shows which is which. For meaning rather than wording, use the translation check (§5). The default speech model is `base` (fast, 145 MB). It mishears a few more words than `small`, which mostly shows up as extra "possible recognition error" items; for reporting-grade transcripts set `WHISPER_MODEL=small` or `medium`.
 
 ### Speech rate
 Words per second (chars/s for ko/ja/zh/th) over *speaking time*, where speaking time is duration × (1 − silence ratio). Units differ between languages, so compare the dub against other dubs in the same language, not against the original.
@@ -40,17 +39,20 @@ Words per second (chars/s for ko/ja/zh/th) over *speaking time*, where speaking 
 ### Loudness over time
 The dBFS of each 0.25 s window, for both tracks. Peaks and gaps should line up. A shifted or stretched pattern shows timing drift that the single duration number hides.
 
-## Score bands in the app
-| Card | ✓ Good | ! Check | ✗ Poor |
+## Score bands (audio and script)
+| Measure | ✓ Good | ! Check | ✗ Poor |
 |---|---|---|---|
-| Timing match: \|Δduration\| / original | ≤ 5% | ≤ 15% | above that |
-| Matches your script / Voice clarity: accuracy | ≥ 80% | ≥ 50% | below |
+| Length match: \|Δduration\| / original | ≤ 5% | ≤ 15% | above that |
+| Matches your script: accuracy | ≥ 80% | ≥ 50% | below |
 | Loudness match: dub vs original | within ±2 dB | within ±4 dB | beyond |
-| Lip movement | always shown as *Experimental* ||| 
+| Extra silence in the dub | ≤ 5 pts | ≤ 15 pts | above |
+| Lip movement | always informational ||| 
 
-The script bands are lenient on purpose. On the demo, a correct Korean dub scores **60%** against `data/ground_truth.txt`, mostly because of wording differences and Whisper mishearing names. The highlighted diff under **What was said** shows which is which.
+The script-free measures and their bands are in §4 and §5. The script bands are lenient on purpose, because paraphrases count as errors (§2).
 
 ## 3. Lip-sync (`analyze_lipsync`), experimental
+
+Measured automatically when the shared dub is lip-synced (`isLipSync`); skipped otherwise, and the report says why.
 
 1. Frames are sampled at about 15 fps (sequential decode) over the first 60 s. MediaPipe runs in VIDEO mode.
 2. Per frame, the Mouth Aspect Ratio is `|lm13 − lm14| / |lm61 − lm291|`. Frames without a face are excluded rather than filled in.
@@ -61,22 +63,55 @@ The script bands are lenient on purpose. On the demo, a correct Korean dub score
 
 `sync_quality` bands: `strong` ≥ 0.4 · `moderate` ≥ 0.2 · `weak` ≥ 0.05 · `none` below that.
 
-### Known limitation: this heuristic does not work on the demo video
+### Known limitation: this heuristic does not work on the sample video
 | Video | r (zero lag) | Face coverage |
 |---|---|---|
 | Original, which is in sync by definition | **−0.20** | 56% |
-| Korean dub | −0.05 | 56% |
+| Perso Korean lip-sync dub | −0.03 | 56% |
 
 The original should score clearly positive, and it doesn't. The causes, found by investigation:
 - **Voice-over B-roll.** The speaker is on screen but not talking (typing, walking) while narration plays. Those frames anti-correlate mouth opening with loudness.
 - **Weak signal even on the talking-head part.** On the first 5.5 s (99% face coverage), every variant tried gave |r| < 0.2 and random best lags: inner vs. outer lips, face-height normalization, speech-band (300–3400 Hz) energy, and smoothing.
 
-**Treat the lip-sync card as informational.** Compare it only against `original_pearson` on the same video, never as an absolute. The proper replacement is a SyncNet-style audio-visual model (the LSE-C / LSE-D metrics), which is tracked in ENGINEERING_REVIEW.md.
+**Treat the lip movement row as informational.** Compare it only against `original_pearson` on the same video, never as an absolute. The proper replacement is a SyncNet-style audio-visual model (the LSE-C / LSE-D metrics), which is tracked in ENGINEERING_REVIEW.md.
+
+## 4. Script-free measures
+Share links carry no script, so these measure the dub against the original directly.
+
+### Dub language (`detect_language`)
+Whisper's language identification on the first 30 s of the dub. **Good** when it matches the target and Whisper is ≥ 50% sure, **Check** when it matches but Whisper is unsure, **Poor** when it's a different language. Catches the worst failure (wrong language, or the original voice left in).
+
+### Voice clarity (`speech_clarity`)
+Share of speech time in Whisper segments with `avg_logprob ≥ −1.0` (Whisper's own threshold for trusting a decode). Segments Whisper itself treats as silence (`no_speech_prob > 0.6` and `avg_logprob < −1.0`) are ignored. Good ≥ 90%, Check ≥ 70%. The unclear segments are listed with timestamps under *Things to check*. It's an intelligibility proxy that needs no script; ASR weaknesses on names and accents also lower it.
+
+### Speech timing (`speech_intervals`, `timing_alignment`)
+1. Speech stretches come from Whisper word timings, merging gaps shorter than 0.3 s and dropping segments Whisper treats as silence. Word timings follow speech, not the music bed, which defeats energy-based voice detection on this kind of video.
+2. Both tracks go on a 50 ms grid. `overlap_pct` is intersection over union of speaking time. Stretches of ≥ 0.5 s where only one track speaks become `mismatches` (`dub_only` / `original_only`, the 8 longest).
+3. Bands: Good ≥ 75%, Check ≥ 55%. **Calibration:** the real Perso EN→KO lip-sync dub of the sample scores **81%**, with two short dub-only spots. Languages differ in rhythm, so 100% isn't expected; these bands are a starting point from one sample and should be tuned on more dubs.
+4. It depends on correct transcription: a dub in the wrong language gets distorted word timings (the language check flags that case separately).
+
+### Distortion (`clipping_pct`)
+Share of dub samples at |x| ≥ 0.999. Good ≤ 0.01%, Check ≤ 0.1%.
+
+### Speaking pace bands
+Chars/s for Korean (Good ≤ 7.5, Check ≤ 9), Japanese (≤ 8.5, ≤ 10.5), Chinese (≤ 6, ≤ 7.5); words/s for other languages (≤ 3.5, ≤ 4.5). Thai has no band and is shown as information. Rules of thumb for "the translation is too long for the time slot"; the sample dub runs at 5.8 chars/s.
+
+### Video integrity (`video_integrity`)
+Resolution, frame rate, frame count and audio stream of both files (OpenCV + ffmpeg stream list). Poor if the dub can't be read or has no audio, Check if resolution or frame rate changed.
+
+## 5. Translation check (`translation_judge.py`, automatic when a key is set)
+Gemini (`gemini-3.5-flash`, low thinking, ≈ 3 s) or Claude reads both timestamped transcripts and returns a meaning score (1–5), a summary, and issues typed missing / added / mistranslation / name-or-number, each with severity, time, exact quotes and a `may_be_recognition_error` flag. Bands: meaning Good ≥ 4, Check = 3; completeness, names/numbers and mistranslations are Good with no issues, Check with minor ones only, Poor with any major one.
+
+It sees transcripts, not audio, so a Whisper mishearing can look like a translation error. The model flags those, and **flagged issues don't change a level**: they are shown as "(+N?)" and listed under *Things to check* to confirm by ear. On the sample, Gemini scored the dub 4/5 and correctly flagged "이나데아크" (for 인하대) and "고맙나요" (for 또 만나요) as probable recognition errors. Without a key it's reported as not measured, with the reason.
+
+## 6. The report and the verdict (`report.py`)
+Every measure gets a level (good / check / poor / info / not measured), a one-sentence explanation and the thresholds used. **Verdict:** any Poor → Poor; otherwise any Check → Needs review; otherwise Good. Info (lip movement, speech offsets) and not-measured items never change it, and the report lists why each unmeasured item wasn't measured. There's deliberately no single 0–100 score: weights between these measures would be arbitrary and hard to defend.
 
 ## Sanity warnings (`warnings` in results)
 Raised automatically when:
 - the duration differs by more than 20% (probably not a matching pair),
 - the dub transcript is empty,
 - the primary error rate is above 0.8 (probably the wrong script or language),
-- lip-sync is invalid on the dub (the reason is included),
-- the worker reports that lip-sync failed and it saved the plain dub instead.
+- lip movement couldn't be measured on the dub (the reason is included).
+
+Each warning also appears under *Things to check* in the report.

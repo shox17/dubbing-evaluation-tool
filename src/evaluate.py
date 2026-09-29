@@ -28,7 +28,8 @@ FACE_MODEL_PATH = os.path.join(SRC_DIR, "face_landmarker.task")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 SAMPLE_RATE = 16000
 
-DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+# base: 145 MB download and fast on CPU; on the sample it gave the same verdict and scores as small (484 MB).
+DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 
 # Scripts written without spaces between words (or with coarse spacing units) are scored by CER.
 CER_LANGS = {"ja", "zh", "ko", "th"}
@@ -42,6 +43,18 @@ LIPSYNC_MAX_SECONDS = 60.0         # analysis window from the start of the clip
 LIPSYNC_MAX_LAG_MS = 200           # diagnostic lag search range (+/-); never used for the headline score
 LIPSYNC_MIN_FACE_COVERAGE = 0.5    # below this the result is reported as invalid
 LIPSYNC_MIN_FRAMES = 20
+
+# Bump when result keys are renamed or removed (app.py RESULTS_SCHEMA_VERSION must match).
+SCHEMA_VERSION = 6
+
+# Speech timing and clarity settings
+CLIP_LEVEL = 0.999                 # |sample| at or above this counts as clipped
+SPEECH_GRID_SEC = 0.05             # resolution of the speech-timing comparison
+SPEECH_MERGE_GAP_SEC = 0.3         # word gaps shorter than this are one stretch of speech
+MISMATCH_MIN_SEC = 0.5             # only-one-track-speaks stretches shorter than this are ignored
+MAX_MISMATCHES = 8                 # longest mismatches listed in the report
+WHISPER_LOGPROB_OK = -1.0          # Whisper's own thresholds for trusting a segment
+WHISPER_NO_SPEECH_OK = 0.6
 
 _whisper_models: dict = {}
 _whisper_lock = threading.Lock()
@@ -98,12 +111,16 @@ def analyze_acoustics(y: np.ndarray, sr: int = SAMPLE_RATE) -> dict:
         non_silent_duration = 0.0
     silence_ratio = float((duration - non_silent_duration) / duration) if duration > 0 else 0.0
 
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
     return {
         "duration_sec": round(duration, 2),
         "mean_rms_energy": round(mean_rms, 4),
         "rms_std": round(std_rms, 4),
         "volume_stability_pct": round(stability, 1),
-        "silence_ratio_pct": round(silence_ratio * 100, 2)
+        "silence_ratio_pct": round(silence_ratio * 100, 2),
+        "peak_dbfs": round(20 * float(np.log10(peak)), 1) if peak > 0 else None,
+        # Samples at or near full scale: audible distortion when more than a handful.
+        "clipping_pct": round(float(np.mean(np.abs(y) >= CLIP_LEVEL)) * 100, 3) if len(y) else 0.0,
     }
 
 
@@ -142,9 +159,139 @@ def whisper_language(code: str) -> Optional[str]:
 
 
 def transcribe(y: np.ndarray, whisper_model, language: Optional[str] = None) -> dict:
-    """Transcribes a 16kHz waveform with Whisper. language=None lets Whisper detect it."""
-    result = whisper_model.transcribe(y, language=language, fp16=False)
-    return {"text": result.get("text", "").strip(), "language": result.get("language", language)}
+    """Transcribes a 16kHz waveform with Whisper, keeping segment confidence and word timings.
+
+    language=None lets Whisper detect it.
+    """
+    result = whisper_model.transcribe(y, language=language, fp16=False, word_timestamps=True)
+    segments = []
+    for s in result.get("segments", []):
+        segments.append({
+            "start": round(float(s["start"]), 2),
+            "end": round(float(s["end"]), 2),
+            "text": s.get("text", "").strip(),
+            "avg_logprob": round(float(s.get("avg_logprob", 0.0)), 3),
+            "no_speech_prob": round(float(s.get("no_speech_prob", 0.0)), 3),
+            "words": [[round(float(w["start"]), 2), round(float(w["end"]), 2)] for w in s.get("words", [])],
+        })
+    return {"text": result.get("text", "").strip(), "language": result.get("language", language),
+            "segments": segments}
+
+
+def detect_language(y: np.ndarray, whisper_model) -> tuple[Optional[str], Optional[float]]:
+    """Whisper's guess of the spoken language in the first 30 s, with its probability."""
+    if not len(y):
+        return None, None
+    audio = whisper.pad_or_trim(y.astype(np.float32))
+    mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model.dims.n_mels).to(whisper_model.device)
+    _, probs = whisper_model.detect_language(mel)
+    code = max(probs, key=probs.get)
+    return code, round(float(probs[code]), 3)
+
+
+def _is_real_speech(seg: dict) -> bool:
+    """False for segments Whisper itself would treat as silence (likely hallucinated over music or noise)."""
+    return not (seg["no_speech_prob"] > WHISPER_NO_SPEECH_OK and seg["avg_logprob"] < WHISPER_LOGPROB_OK)
+
+
+def speech_intervals(segments: list[dict], merge_gap: float = SPEECH_MERGE_GAP_SEC) -> list[list[float]]:
+    """Stretches of speech [start, end] from Whisper word timings, merging short gaps between words."""
+    spans = []
+    for seg in segments:
+        if not _is_real_speech(seg):
+            continue
+        spans.extend(seg.get("words") or [[seg["start"], seg["end"]]])
+    spans = sorted([s, e] for s, e in spans if e > s)
+    merged: list[list[float]] = []
+    for s, e in spans:
+        if merged and s - merged[-1][1] <= merge_gap:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    return [[round(s, 2), round(e, 2)] for s, e in merged]
+
+
+def speech_clarity(segments: list[dict]) -> dict:
+    """Share of speech time in segments Whisper recognised confidently, plus the unclear segments."""
+    real = [s for s in segments if _is_real_speech(s) and s["end"] > s["start"]]
+    total = sum(s["end"] - s["start"] for s in real)
+    unclear = [s for s in real if s["avg_logprob"] < WHISPER_LOGPROB_OK]
+    unclear_time = sum(s["end"] - s["start"] for s in unclear)
+    return {
+        "confident_pct": round((1 - unclear_time / total) * 100, 1) if total > 0 else None,
+        "mean_logprob": round(float(np.average([s["avg_logprob"] for s in real],
+                                               weights=[s["end"] - s["start"] for s in real])), 3) if real else None,
+        "segments": len(real),
+        "unclear_segments": [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in unclear],
+    }
+
+
+def _grid(intervals: list[list[float]], n: int, step: float) -> np.ndarray:
+    """Boolean speaking/not-speaking mask of n cells of step seconds."""
+    mask = np.zeros(n, dtype=bool)
+    for s, e in intervals:
+        mask[max(0, int(s / step)):min(n, int(np.ceil(e / step)))] = True
+    return mask
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """(start, end) index pairs of consecutive True cells."""
+    edges = np.diff(np.concatenate([[0], mask.astype(np.int8), [0]]))
+    return list(zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)))
+
+
+def timing_alignment(original: list[list[float]], dubbed: list[list[float]], duration_sec: float,
+                     step: float = SPEECH_GRID_SEC) -> dict:
+    """How well the dub speaks at the same moments as the original (overlap of speech stretches)."""
+    empty = {"overlap_pct": None, "original_covered_pct": None, "dub_in_original_pct": None,
+             "start_offset_sec": None, "end_offset_sec": None, "mismatches": []}
+    if duration_sec <= 0 or not original or not dubbed:
+        return empty
+    n = int(np.ceil(duration_sec / step)) + 1
+    o, d = _grid(original, n, step), _grid(dubbed, n, step)
+    both, either = np.sum(o & d), np.sum(o | d)
+    mismatches = []
+    for mask, kind in ((d & ~o, "dub_only"), (o & ~d, "original_only")):
+        for a, b in _runs(mask):
+            if (b - a) * step >= MISMATCH_MIN_SEC:
+                mismatches.append({"start": round(a * step, 2), "end": round(b * step, 2), "kind": kind})
+    mismatches.sort(key=lambda m: m["end"] - m["start"], reverse=True)
+    return {
+        "overlap_pct": round(both / either * 100, 1) if either else None,
+        "original_covered_pct": round(both / np.sum(o) * 100, 1) if np.sum(o) else None,
+        "dub_in_original_pct": round(both / np.sum(d) * 100, 1) if np.sum(d) else None,
+        "start_offset_sec": round(dubbed[0][0] - original[0][0], 2),
+        "end_offset_sec": round(dubbed[-1][1] - original[-1][1], 2),
+        "mismatches": sorted(mismatches[:MAX_MISMATCHES], key=lambda m: m["start"]),
+    }
+
+
+def probe_media(video_path: str) -> dict:
+    """Resolution, frame rate, frame count, duration and whether an audio track exists (reads the file only)."""
+    info = {"readable": False, "width": None, "height": None, "fps": None, "frames": None,
+            "duration_sec": None, "has_audio": False}
+    cap = cv2.VideoCapture(video_path)
+    try:
+        if cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS) or 0
+            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            info.update(readable=frames > 0, width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                        height=int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), fps=round(fps, 2) if fps else None,
+                        frames=frames, duration_sec=round(frames / fps, 2) if fps else None)
+    finally:
+        cap.release()
+    # ffmpeg prints the stream list to stderr and exits non-zero without an output file; that's expected.
+    proc = subprocess.run([FFMPEG_EXE, "-nostdin", "-hide_banner", "-i", video_path], capture_output=True)
+    info["has_audio"] = "Audio:" in proc.stderr.decode(errors="replace")
+    return info
+
+
+def video_integrity(original_video_path: str, dubbed_video_path: str) -> dict:
+    """Compares the two files' technical properties: the dub should change the voice, not the picture."""
+    o, d = probe_media(original_video_path), probe_media(dubbed_video_path)
+    same_res = (o["width"], o["height"]) == (d["width"], d["height"])
+    same_fps = o["fps"] is not None and d["fps"] is not None and abs(o["fps"] - d["fps"]) <= 0.1
+    return {"original": o, "dubbed": d, "same_resolution": same_res, "same_fps": same_fps}
 
 
 def _mouth_aspect_ratio(lm) -> float:
@@ -181,14 +328,15 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
     reported only as a diagnostic, because maximising over lags inflates pure noise to r ~ +0.1.
     """
     invalid = {
-        "valid": False, "reason": "", "pearson_correlation": None, "best_lag_correlation": None,
+        "valid": False, "reason": "", "reason_key": None, "reason_params": {},
+        "pearson_correlation": None, "best_lag_correlation": None,
         "best_lag_ms": None, "sync_quality": "n/a", "face_coverage_pct": 0.0, "frames_analyzed": 0,
         "timestamps": [], "mar_waveform": [], "rms_waveform": []
     }
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        return {**invalid, "reason": "video could not be opened"}
+        return {**invalid, "reason": "video could not be opened", "reason_key": "r.lips.no_video"}
     fps = cap.get(cv2.CAP_PROP_FPS)
     if not fps or fps <= 0 or np.isnan(fps):
         fps = 25.0
@@ -229,9 +377,11 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
     base = {**invalid, "face_coverage_pct": round(coverage * 100, 1), "frames_analyzed": n}
 
     if n < LIPSYNC_MIN_FRAMES:
-        return {**base, "reason": f"only {n} frames analysed"}
+        return {**base, "reason": f"only {n} frames analysed", "reason_key": "r.lips.few_frames",
+                "reason_params": {"n": n}}
     if coverage < LIPSYNC_MIN_FACE_COVERAGE:
-        return {**base, "reason": f"face detected in only {coverage * 100:.0f}% of frames"}
+        return {**base, "reason": f"face detected in only {coverage * 100:.0f}% of frames",
+                "reason_key": "r.lips.few_faces", "reason_params": {"pct": f"{coverage * 100:.0f}%"}}
 
     # Audio RMS on a fine 10 ms grid, then sampled at (lag-shifted) frame times.
     hop = sr // 100
@@ -240,7 +390,7 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
 
     ts_face, mar_face = ts[face_mask], mar[face_mask]
     if np.std(mar_face) < 1e-6:
-        return {**base, "reason": "mouth shape does not change"}
+        return {**base, "reason": "mouth shape does not change", "reason_key": "r.lips.no_motion"}
     mar_z = (mar_face - mar_face.mean()) / mar_face.std()
 
     def corr_at(lag_s: float) -> float:
@@ -257,7 +407,7 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
 
     return {
         "valid": True,
-        "reason": "",
+        "reason": "", "reason_key": None, "reason_params": {},
         "pearson_correlation": round(zero_r, 4),
         "best_lag_correlation": round(best_r, 4),
         "best_lag_ms": int(best_lag),
@@ -270,24 +420,33 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
     }
 
 
-def _quality_warnings(orig_ac: dict, dub_ac: dict, stt: dict, dub_ls: dict, dub_text: str) -> list[str]:
-    """Plain-language warnings for results that look wrong (mismatched videos, empty transcript, ...)."""
+LIPSYNC_SKIPPED = {
+    "valid": False, "reason": "skipped (turned off for this run)", "reason_key": "r.lips.skipped", "reason_params": {},
+    "pearson_correlation": None,
+    "best_lag_correlation": None, "best_lag_ms": None, "sync_quality": "n/a", "face_coverage_pct": None,
+    "frames_analyzed": 0, "timestamps": [], "mar_waveform": [], "rms_waveform": []
+}
+
+
+def _warning(key: str, text: str, **params) -> dict:
+    """A warning as a translatable key with its values, plus the English text for the JSON file."""
+    return {"key": key, "params": {k: str(v) for k, v in params.items()}, "text": text}
+
+
+def _quality_warnings(orig_ac: dict, dub_ac: dict, stt: dict, dub_ls: dict, dub_text: str) -> list[dict]:
+    """Warnings for results that look wrong (mismatched videos, empty transcript, ...)."""
     warnings = []
     od, dd = orig_ac["duration_sec"], dub_ac["duration_sec"]
     if od > 0 and abs(dd - od) / od > 0.2:
-        warnings.append(
-            f"Dubbed duration ({dd}s) differs from the original ({od}s) by more than 20% — "
-            "the videos may not be a matching pair."
-        )
+        warnings.append(_warning("r.warn.length", f"The dub ({dd} s) and the original ({od} s) differ in length by more "
+                                 "than 20%; they may not be the same video.", dub=dd, orig=od))
     if not dub_text:
-        warnings.append("Whisper produced no transcript for the dubbed audio.")
+        warnings.append(_warning("r.warn.no_speech", "Speech recognition found no speech in the dub."))
     if stt.get("error_rate") is not None and stt["error_rate"] > 0.8:
-        warnings.append(
-            f"{stt['primary_metric'].upper()} is {stt['error_rate']:.2f} — check that the ground-truth script "
-            "matches this video and target language."
-        )
-    if not dub_ls["valid"]:
-        warnings.append(f"Lip-sync could not be measured on the dubbed video: {dub_ls['reason']}.")
+        warnings.append(_warning("r.warn.script", "Very little of the script was heard; check that the script "
+                                 "belongs to this video and is in the dub's language."))
+    if not dub_ls["valid"] and dub_ls.get("reason_key") not in (None, "r.lips.skipped"):
+        warnings.append(_warning("r.warn.lips", f"Lip movement couldn't be measured: {dub_ls['reason']}."))
     return warnings
 
 
@@ -314,12 +473,12 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
 
 def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground_truth_text: str,
                         target_lang: str = "ko", whisper_model_name: str = DEFAULT_WHISPER_MODEL,
-                        perso_translation: Optional[str] = None,
-                        on_step: Optional[Callable[[str, float], None]] = None) -> dict:
-    """Runs the acoustic, speech-recognition and lip-sync evaluation. Returns results; does not write files.
+                        on_step: Optional[Callable[[str, float], None]] = None,
+                        include_lipsync: bool = True, source_lang: Optional[str] = None) -> dict:
+    """Runs the acoustic, speech-recognition, timing, file and lip-sync evaluation. Returns results; writes no files.
 
-    perso_translation: the script Perso translated and voiced (live runs). When given, the dub is also scored
-    against it, which isolates voice clarity from wording differences with the user's target script.
+    include_lipsync: the experimental lip-movement analysis is the slowest step; False skips it.
+    source_lang: the original's language when known (share links say it); None lets Whisper detect it.
     """
     def step(msg: str, frac: float):
         """Reports evaluation progress, if a callback was given."""
@@ -339,20 +498,28 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     dub_ac = analyze_acoustics(y_dub)
 
     step("Transcribing the original speech...", 0.20)
-    orig_stt = transcribe(y_orig, model, language=None)
+    orig_stt = transcribe(y_orig, model, language=whisper_language(source_lang) if source_lang else None)
+    step("Checking which language the dub is in...", 0.40)
+    dub_detected, dub_detected_prob = detect_language(y_dub, model)
     step("Transcribing the dubbed speech...", 0.45)
     stt_lang = whisper_language(target_lang)
     dub_stt = transcribe(y_dub, model, language=stt_lang)
     scores = score_transcript(ground_truth_text, dub_stt["text"], target_lang)
 
-    vs_perso = score_transcript(perso_translation, dub_stt["text"], target_lang) if perso_translation else None
-    translation_vs_target = (score_transcript(ground_truth_text, perso_translation, target_lang)
-                             if perso_translation and (ground_truth_text or "").strip() else None)
+    step("Comparing when each track speaks...", 0.65)
+    orig_speech = speech_intervals(orig_stt["segments"])
+    dub_speech = speech_intervals(dub_stt["segments"])
+    alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
+    clarity = speech_clarity(dub_stt["segments"])
+    integrity = video_integrity(original_video_path, dubbed_video_path)
 
-    step("Analyzing lip movement in the dubbed video...", 0.70)
-    dub_ls = analyze_lipsync(dubbed_video_path, y_dub)
-    step("Analyzing lip movement in the original video...", 0.85)
-    orig_ls = analyze_lipsync(original_video_path, y_orig)
+    if include_lipsync:
+        step("Analyzing lip movement in the dubbed video...", 0.70)
+        dub_ls = analyze_lipsync(dubbed_video_path, y_dub)
+        step("Analyzing lip movement in the original video...", 0.85)
+        orig_ls = analyze_lipsync(original_video_path, y_orig)
+    else:
+        dub_ls = orig_ls = {**LIPSYNC_SKIPPED}
 
     orig_speaking = orig_ac["duration_sec"] * (1 - orig_ac["silence_ratio_pct"] / 100)
     dub_speaking = dub_ac["duration_sec"] * (1 - dub_ac["silence_ratio_pct"] / 100)
@@ -360,7 +527,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     step("Done", 1.0)
 
     return {
-        "schema_version": 3,
+        "schema_version": SCHEMA_VERSION,
         "metadata": {
             "original_video": original_video_path,
             "dubbed_video": dubbed_video_path,
@@ -382,6 +549,9 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "original_silence_ratio": round(orig_ac["silence_ratio_pct"] / 100.0, 4),
             "dubbed_silence_ratio": round(dub_ac["silence_ratio_pct"] / 100.0, 4),
             "silence_diff": round((dub_ac["silence_ratio_pct"] - orig_ac["silence_ratio_pct"]) / 100.0, 4),
+            "original_peak_dbfs": orig_ac["peak_dbfs"],
+            "dubbed_peak_dbfs": dub_ac["peak_dbfs"],
+            "dubbed_clipping_pct": dub_ac["clipping_pct"],
             "loudness_envelope": {
                 "step_sec": 0.25,
                 "original_db": loudness_envelope(y_orig),
@@ -393,15 +563,26 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "ground_truth": (ground_truth_text or "").strip(),
             "dubbed_transcript": dub_stt["text"],
             "original_transcript": orig_stt["text"],
-            "perso_translation": perso_translation,
-            "vs_perso_script": vs_perso,
-            "perso_translation_vs_target": translation_vs_target,
             "original_speech_rate": speech_rate(orig_stt["text"], orig_speaking, source_lang),
-            "dubbed_speech_rate": speech_rate(dub_stt["text"], dub_speaking, target_lang)
+            "dubbed_speech_rate": speech_rate(dub_stt["text"], dub_speaking, target_lang),
+            "dubbed_language_detected": dub_detected,
+            "dubbed_language_probability": dub_detected_prob,
+            "clarity": clarity,
+            "original_segments": [{k: s[k] for k in ("start", "end", "text")} for s in orig_stt["segments"]],
+            "dubbed_segments": [{k: s[k] for k in ("start", "end", "text")} for s in dub_stt["segments"]]
         },
+        "timing_alignment": {
+            **alignment,
+            "original_speech": orig_speech,
+            "dubbed_speech": dub_speech
+        },
+        "video_integrity": integrity,
         "lipsync_metrics": {
+            "measured": include_lipsync,
             "valid": dub_ls["valid"],
             "reason": dub_ls["reason"],
+            "reason_key": dub_ls.get("reason_key"),
+            "reason_params": dub_ls.get("reason_params", {}),
             "pearson_correlation": dub_ls["pearson_correlation"],
             "best_lag_correlation": dub_ls["best_lag_correlation"],
             "best_lag_ms": dub_ls["best_lag_ms"],
@@ -417,7 +598,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
                 "rms_norm": dub_ls["rms_waveform"]
             }
         },
-        "warnings": ([] if stt_lang else [
-            f"Speech recognition (Whisper) doesn't support the target language ({target_lang}), so it guessed "
-            "the language. Treat the script scores as rough."]) + _quality_warnings(orig_ac, dub_ac, scores, dub_ls, dub_stt["text"])
+        "warnings": ([] if stt_lang else [_warning(
+            "r.warn.no_whisper", f"Speech recognition doesn't know {target_lang}, so it guessed the language; "
+            "treat speech results as rough.", lang=target_lang)]) + _quality_warnings(orig_ac, dub_ac, scores, dub_ls, dub_stt["text"])
     }

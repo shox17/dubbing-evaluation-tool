@@ -1,8 +1,7 @@
 """Tests for background jobs: results, errors, cancellation, progress weighting and the stage checklist."""
 import time
 
-from src.jobs import Progress, get_job, start_job
-from src.perso_api import Cancelled
+from src.jobs import Cancelled, Progress, get_job, start_job
 
 
 def wait(job, timeout=5):
@@ -15,29 +14,28 @@ def wait(job, timeout=5):
 
 def test_job_runs_in_background_and_stores_result():
     def runner(report, cancel):
-        report(Progress("upload", "Uploading", 0.5))
-        report(Progress("dubbing", "Generating Voice", 0.5, eta_minutes=3, perso_project=11))
+        report(Progress("fetch", "Reading the shared Perso project...", 1.0))
+        report(Progress("download", "Downloading the dubbed video...", 0.5))
         return {"ok": True}
-    job = wait(start_job(runner, {}, ["upload", "dubbing", "evaluate"]))
+    job = wait(start_job(runner, {}, ["fetch", "download", "evaluate"]))
     assert job.status == "done" and job.result == {"ok": True}
-    assert job.perso_projects == [11]
     assert get_job(job.id) is job
     assert job.overall_fraction == 1.0
 
 
 def test_overall_progress_and_stage_states():
     def runner(report, cancel):
-        report(Progress("lipsync", "Applying Lip Sync", 0.5))
+        report(Progress("evaluate", "Transcribing the dubbed speech...", 0.5))
         cancel.wait(5)
         raise Cancelled()
-    job = start_job(runner, {}, ["upload", "dubbing", "lipsync", "download", "evaluate"])
+    job = start_job(runner, {}, ["fetch", "download", "evaluate"])
     time.sleep(0.05)
-    # weights: upload 1, dubbing 4, lipsync 6 (half done), download 1, evaluate 2 -> (1+4+3)/14
-    assert abs(job.overall_fraction - 8 / 14) < 1e-6
-    assert [job.stage_state(s) for s in job.stages] == ["done", "done", "active", "pending", "pending"]
+    # weights: fetch 0.2, download 1, evaluate 6 (half done) -> (0.2 + 1 + 3) / 7.2
+    assert abs(job.overall_fraction - 4.2 / 7.2) < 1e-6
+    assert [job.stage_state(s) for s in job.stages] == ["done", "done", "active"]
     job.cancel_event.set()
     wait(job)
-    assert job.status == "cancelled" and job.stage_state("lipsync") == "failed"
+    assert job.status == "cancelled" and job.stage_state("evaluate") == "failed"
 
 
 def test_failure_is_captured():

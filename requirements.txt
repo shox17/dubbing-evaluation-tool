@@ -9,3 +9,4 @@ pandas==2.3.3
 imageio-ffmpeg==0.6.0
 python-dotenv==1.2.3
 requests==2.34.2
+anthropic==1.9.0              # optional translation check (Claude); the app runs without a key

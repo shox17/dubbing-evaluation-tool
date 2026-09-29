@@ -19,12 +19,8 @@ __pycache__/
 htmlcov/
 *.egg-info/
 
-# Videos and results: keep only the sample and its ready-made Korean dub (the free demo needs both).
-data/input/*
-!data/input/sample_original.mp4
-data/output/*
-!data/output/sample_dubbed_ko.mp4
-*.dubresume.json
+# Downloaded videos, reports and results are written under data/ on every run.
+data/
 *.log
 
 # OS / editor

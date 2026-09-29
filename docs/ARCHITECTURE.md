@@ -3,78 +3,84 @@
 ## Flow
 
 ```
-app.py (Streamlit)
- ├─ setup view ── Start ──► jobs.start_job(run_pipeline, params) ──► ?job=<id> in the URL
- ├─ progress view: @st.fragment(run_every=2 s) reads Job (stage, %, ETA) ── done ──► results view
- └─ results view: reads the results dict (also saved to data/output/results.json)
-
-jobs.Job (background thread)
- └─ pipeline.run_pipeline(report=job.report, cancel_event=job.cancel_event)
-     ├─ demo: data/output/sample_dubbed_ko.mp4                                    stage: evaluate
-     └─ live (perso_api.PersoClient):
-         validate media → SAS upload → register (mediaSeq)                       stage: upload
-         PUT queue → POST translate → poll /progress every 5 s                    stage: dubbing
-         POST lip-sync (separate project) → poll /progress                        stage: lipsync
-           └ on failure: keep the dub and add a warning (same policy as Perso's CLI)
-         download-info → download (lipSyncVideo | dubbingVideo) → GET /script     stage: download
-     evaluate.run_full_evaluation(..., perso_translation, on_step)               stage: evaluate
-     save_results (atomic)
+qa.py → src/cli.py ─────────────┐
+app.py (Streamlit)              │
+ ├─ setup view: paste link, live project preview, options
+ │    Evaluate ──► jobs.start_job(run_share_evaluation, params) ──► ?job=<id> in the URL
+ ├─ progress view: @st.fragment(run_every=2 s) reads Job (stage, %) ── done ──► results view
+ └─ results view: build_report(results) → verdict, sections, things to check, details
+                                │
+pipeline.run_share_evaluation(share_url)
+ parse_share_url → GET /projects/shared/{seq}                                 stage: fetch
+ download original + (lipSyncFileUrl | translatedFileUrl) into runs/<id>/     stage: download
+ evaluate.run_full_evaluation(original, dub, target_lang, source_lang)        stage: evaluate
+ finish_run: translation_judge → report.build_report → save_report_files + results.json
 ```
 
 ## Modules
 
 ### `src/perso_api.py`
-Implements the documented REST flow (https://developers.perso.ai/llms.txt).
-- **Auth:** the `XP-API-KEY` header. The key comes from `PERSO_API_KEY`, then `XP_API_KEY`, then `~/.perso/credentials` (written by the Perso CLI).
-- **Account:** `list_spaces` (filtered to `serviceType == video_translator`), `default_space` (with `PERSO_SPACE_SEQ` pin, else the owned default), `plan_status`, `remaining_credits`, `estimate_credits` (`/media/quota`).
-- **Media:** `validate_media` checks limits before uploading. `upload_video` gets a SAS token, PUTs to the blob, then registers with the query string stripped.
-- **Languages:** `list_languages` reads `GET /languages` and returns target entries (see `src/languages.py`).
-- **Projects:** `request_dubbing` (initialises the queue once per space, uses `targetLanguages` with `AUDIO_ENGINE_V3` plus `languageTag` for regional variants such as `en-GB`, `withLipSync: false`), `request_lipsync`, `get_status` (normalises `progressReason`, progress, ETA, and failure message), `wait_for` (5 s polling with cancel and timeout), `cancel`, `get_script`, `download_video` (checks `download-info`, URL-encodes the media path, retries).
-- **Errors:** `PersoError` messages are safe to show users. Known codes (VT4021 credits, VT4044 unknown language, VT5034 queue full, F400x media limits, 401/403/429) map to plain-language hints. 429 and 5xx responses are retried with backoff.
-
-### `src/jobs.py`
-- `start_job(runner, params, stages)` runs `runner(report, cancel_event)` in a daemon thread. Jobs live in a process-wide registry, so a page reload (`?job=<id>`) reattaches to them.
-- `Job.overall_fraction` weights stages by typical duration (upload 1, dubbing 4, lip-sync 6, download 1, evaluate 2). `stage_state()` drives the done / active / pending / failed checklist on the progress page.
-- **Limitation:** the registry is in memory. If the app server restarts, tracking is lost, but the Perso project keeps running and stays in the workspace.
+Share links only; no API key, no account (https://developers.perso.ai/llms.txt).
+- `parse_share_url` takes the `seq=` token from `https://perso.ai/<lang>/share/video-translator?seq=…` (or a bare token), and raises `ValueError` with a plain message for anything else, before any network call.
+- `get_shared_project` calls the public `GET /video-translator/api/v1/projects/shared/{token}`. It returns title, `durationMs`, `sourceLanguage` / `targetLanguage`, and `originalFileUrl`, `translatedFileUrl`, `lipSyncFileUrl`, `isLipSync`. VT4035 becomes "sharing is turned off"; an unknown link or a project without a finished dub also get plain messages. 429 and 5xx are retried with backoff.
+- `download_media` streams a relative `/perso-storage/…` path from `https://portal-media.perso.ai` (URL-encoded) with retries and an atomic `.part` rename.
 
 ### `src/pipeline.py`
-- `run_pipeline` validates the input, extension (`.mp4/.mov/.webm`) and demo pairing, then runs the flow above. The target language (an id like `ko` or `en-GB`, a code, or a name) is resolved against Perso's live list on live runs, after the extension check, so a bad file makes no API calls.
-
-### `src/i18n.py`
-- `TEXT` holds every interface string in `en`, `ko`, `pt` (Brazil) and `es`, keyed by a short id. `app.py` reads it through `t(key, **values)`, which uses the language picked in the sidebar (`st.session_state.ui_lang`, defaulting to the browser locale).
-- `MESSAGES` translates the fixed English progress messages from `src/` (Perso steps, pipeline and evaluation steps) by their text. Dynamic messages, errors and result warnings stay in English.
-- `tests/test_i18n.py` checks that every key has all four languages with the same `{placeholders}`.
-
-### `src/languages.py`
-- One entry per selectable language: `{id, code, tag, name, experimental}`. `id` is the regional tag (`en-GB`, `pt-PT`, `es-ES`) or, for a code's default row, the code itself.
-- `FALLBACK_LANGUAGES` is a snapshot of the Language API (77 targets, 2026-09-26). The app uses it when Perso can't be reached (demo, no key, tests). Regenerate it if Perso adds languages.
-- `resolve_language` matches by id, name, code or name without region ("English" → English (US)).
-- `probe_video` returns duration, size and resolution for validation and cost estimates.
-- `pipeline_stages(demo, lipsync)` gives the stages the UI shows.
-- Paths are anchored at the project root. Live dubs go to `data/output/runs/<run-id>/`, and the newest `MAX_KEPT_RUNS` are kept.
+- `run_share_evaluation` parses the link, reads the project, downloads the original and the dub into `data/output/runs/<run-id>/` (the lip-synced video when `isLipSync`), and evaluates with the project's source and target languages. Lip movement is measured only when the evaluated video is lip-synced (`include_lipsync=None` = automatic; the CLI's `--no-lipsync` forces it off). It checks the stop signal between steps.
+- `finish_run`: the optional translation check, `build_report`, `save_report_files` (`report.json` = report + results, `report.html`, `report.txt`), then `results.json`. The newest `MAX_KEPT_RUNS` run folders are kept.
 
 ### `src/evaluate.py`
-This module is pure: it writes no files and has no side effects on import. `run_full_evaluation` reports sub-steps through `on_step`. See [METRICS.md](METRICS.md).
+Pure: no file writes (only temp audio) and no side effects on import. `run_full_evaluation` reports sub-steps through `on_step`, takes `include_lipsync` (skip the slow experimental step) and `source_lang`. It returns audio measures, both transcripts with Whisper segments, the dub's detected language, clarity, speech intervals and their alignment, clipping, a technical comparison of both files, and lip movement. See [METRICS.md](METRICS.md).
+
+### `src/translation_judge.py`
+One LLM review of both timestamped transcripts: a 1–5 meaning score, a summary, and issues typed `missing / added / mistranslation / name_or_number` with severity, time, exact quotes and `may_be_recognition_error`.
+- **Provider:** Gemini when `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set, else Claude when `ANTHROPIC_API_KEY` is available (`judge_provider()`).
+- **Gemini:** REST `generateContent` with the key in the `x-goog-api-key` header, `responseJsonSchema` for structured output, temperature 0, `thinkingLevel` low. 429/5xx are retried twice with backoff, then the next model in `GEMINI_MODELS` is tried (`gemini-3.5-flash` → `gemini-flash-latest` → `gemini-3.8-flash` → `gemini-3.1-flash-lite`); 404 skips to the next model. Google's "high demand" 503s are frequent and per model, hence the chain.
+- **Claude:** `claude-opus-5-5` with structured output and server-side refusal fallback.
+- Any failure (no key, rejected key, overload, refusal, unreadable output) returns a not-measured result with the reason; it never fails the run. Tests replace it with a stub (`tests/conftest.py`) and remove all provider keys from the environment.
+
+### `src/report.py` / `src/report_text.py`
+Pure. `build_report(results, lang)` builds the whole report in the interface language (`en`, `ko`, `pt`, `es`); every sentence comes from `src/report_text.py` (keys `r.*`), and the judge's summary and explanations are picked from its four-language output. The app rebuilds the report on each render, so switching language switches the report. It returns `{project, overall{level,label,headline,counts}, sections[{id,title,metrics[{id,label,level,value,unit,display,message,thresholds}],note}], things_to_check[{start,end,category,severity,message}], not_measured[], method}`. All thresholds are constants at the top of the file and are printed in every row. `render_text` and `render_html` present the same report; the HTML is self-contained (light/dark) and embeds the videos by relative path when saved in the run folder.
+
+### `src/cli.py` / `qa.py`
+`python qa.py "<share link>" [--script/--script-file] [--no-lipsync] [--no-translation-check] [--whisper-model] [--json] [--fail-on never|poor|check] [--verbose]`. Progress on stderr, report on stdout; MediaPipe's native logs are silenced unless `--verbose`. Exit 0 done, 1 verdict failed `--fail-on`, 2 could not evaluate.
+
+### `src/jobs.py`
+- `start_job(runner, params, stages)` runs `runner(report, cancel_event)` in a daemon thread. Jobs live in a process-wide registry, so a page reload (`?job=<id>`) reattaches to them. `Cancelled` marks a stopped job.
+- `Job.overall_fraction` weights stages by typical duration (fetch 0.2, download 1, evaluate 6). `stage_state()` drives the done / active / pending / failed checklist.
+- **Limitation:** the registry is in memory; restarting the app server loses tracking of a running evaluation.
+
+### `src/i18n.py`
+- `TEXT` holds every interface string in `en`, `ko`, `pt` (Brazil) and `es`. `app.py` reads it through `t(key, **values)` with the language picked in the sidebar (default: the browser locale). Report section titles and metric labels are translated (`rsec.*`, `rmetric.*`); report messages stay in English.
+- `MESSAGES` translates the fixed progress messages from `src/`.
+- `tests/test_i18n.py` checks that every key has all four languages with the same `{placeholders}`.
 
 ### `app.py`
-- The router picks the view: a running job shows progress, a finished job shows results, a failed or cancelled job shows an error, and otherwise the setup form appears.
-- `perso_account()` (cached 60 s) and `credit_estimate()` (cached 5 min) feed the sidebar and the cost line.
-- Form widget values are re-assigned to session state on every run, so they survive while the form is hidden.
+- The router picks the view: a running job shows progress, a finished job shows results, a failed or stopped job shows an error, otherwise the setup form.
+- `shared_project()` (cached 5 min) feeds the live preview under the link box.
+- The results page always rebuilds the report from the results, so it reflects the current report rules.
 
-## `results.json` (schema_version 3)
-The fields match version 2, plus:
-- `acoustic_metrics`: `original_speaking_sec`, `dubbed_speaking_sec`, and `loudness_envelope {step_sec, original_db[], dubbed_db[]}`.
-- `speech_recognition`: `perso_translation`, `vs_perso_script` (score object), `perso_translation_vs_target` (score object), and `original_speech_rate` / `dubbed_speech_rate` (`{value, unit}`). Scores are `null` when no script was entered.
-- `lipsync_metrics`: `original_face_coverage_pct`.
-- `pipeline.perso`: `{space_seq, media_seq, dubbing_project, lipsync_project}`.
+## `results.json` (schema_version 6)
+- `metadata`: videos, `target_language`, `detected_source_language`, `whisper_model`.
+- `acoustic_metrics`: durations, speaking time, RMS and ratio, volume stability, silence, `original_peak_dbfs`, `dubbed_peak_dbfs`, `dubbed_clipping_pct`, `loudness_envelope {step_sec, original_db[], dubbed_db[]}`.
+- `speech_recognition`: script scores (`wer`, `cer`, `primary_metric`, `error_rate`, `accuracy_pct`; `null` unless the CLI got `--script`), `ground_truth`, both transcripts, both speech rates, `dubbed_language_detected`, `dubbed_language_probability`, `clarity {confident_pct, mean_logprob, segments, unclear_segments[]}`, `original_segments[]`, `dubbed_segments[]`.
+- `timing_alignment`: `overlap_pct`, `original_covered_pct`, `dub_in_original_pct`, `start_offset_sec`, `end_offset_sec`, `mismatches[{start, end, kind}]`, `original_speech[]`, `dubbed_speech[]`.
+- `video_integrity`: `original` / `dubbed` `{readable, width, height, fps, frames, duration_sec, has_audio}`, `same_resolution`, `same_fps`.
+- `lipsync_metrics`: `measured`, `valid`, `reason`, zero-lag and best-lag correlation, face coverage, the original's values, waveforms.
+- `translation_judge`: `{measured, reason, model, meaning_score, summary, issues[]}`.
+- `report`: the output of `build_report`.
+- `pipeline`: `run_id`, `execution_mode`, local video paths, target language name/code/id, `share {share_url, seq, title, source_language_name, source_language_code, target_language_name, is_lipsync, evaluated_video, duration_ms, created}`, `timestamp`, `report_files`.
 
-When you rename or remove keys, bump `schema_version` in `evaluate.py` and `RESULTS_SCHEMA_VERSION` in `app.py`.
+Version 6 turned `warnings` into `{key, params, text}` objects, added `reason_key` / `reason_params` to lip-sync and translation-check results, and made the judge's `summary` and issue `explanation` `{en, ko, pt, es}` objects. Version 5 removed the dubbing-only keys (`perso_translation`, `vs_perso_script`, `perso_translation_vs_target`, `pipeline.perso`, `lip_dubbing_enabled`). When you rename or remove keys, bump `SCHEMA_VERSION` in `evaluate.py` and `RESULTS_SCHEMA_VERSION` in `app.py` (the app asserts they match).
 
 ## Configuration
 | Variable | Default | Purpose |
 |---|---|---|
-| `PERSO_API_KEY` | CLI key file | API key |
-| `PERSO_SPACE_SEQ` | owned default | Default workspace |
+| `GEMINI_API_KEY` | none | Turns on the translation check with Gemini (preferred) |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | First Gemini model tried (`gemini-flash-latest` is the fallback) |
+| `GEMINI_THINKING` | `low` | Gemini thinking level: `low` ≈ 3 s per review, `high` ≈ 40 s |
+| `ANTHROPIC_API_KEY` | none | Translation check with Claude, when no Gemini key is set |
+| `CLAUDE_JUDGE_MODEL` | `claude-opus-5-5` | Claude model for the translation check |
+| `WHISPER_MODEL` | `base` | Speech model (145 MB, fast on CPU). The app has no setting for it; the CLI accepts `--whisper-model` |
+| `MAX_KEPT_RUNS` | `10` | Run folders kept |
 | `PERSO_API_BASE` / `PERSO_MEDIA_BASE` | `https://api.perso.ai` / `https://portal-media.perso.ai` | Endpoints |
-| `WHISPER_MODEL` | `small` | Default speech model (can be changed in the sidebar) |
-| `MAX_KEPT_RUNS` | `10` | Downloaded runs kept |
