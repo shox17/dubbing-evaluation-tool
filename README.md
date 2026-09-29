@@ -123,7 +123,7 @@ The **lip movement number is not reliable on its own**; only compare it with the
 source eval_env/bin/activate
 streamlit run app.py          # reloads when you save a file
 pytest -m "not slow"          # run after every change (~6 s)
-pytest                        # before committing (~20 s; real Whisper on tests/data/sample.mp4)
+pytest                        # before committing (~20 s; the 2 slow tests need a local tests/data/sample.mp4)
 ```
 
 ### Where things live
@@ -140,7 +140,8 @@ src/cli.py               The command-line entry point behind qa.py
 src/jobs.py              Background job runner and progress model (stages, %, stop)
 src/i18n.py              Interface text in English, Korean, Portuguese and Spanish
 src/face_landmarker.task MediaPipe face model used for lip movement
-tests/                   pytest suite; tests/fake_perso.py fakes the share endpoint, tests/data/sample.mp4 is test media
+tests/                   pytest suite; tests/fake_perso.py fakes the share endpoint. tests/data/sample.mp4 (any ~30 s
+                         English talking-head clip) is local test media, not in git; slow tests skip without it
 data/output/runs/<id>/   Downloaded videos and report files of each run (not committed)
 docs/                    Architecture, metrics, engineering review
 AGENTS.md                Guide and rules for AI coding agents (Codex reads it; CLAUDE.md imports it)

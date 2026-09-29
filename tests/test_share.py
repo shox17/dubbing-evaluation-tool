@@ -6,7 +6,7 @@ import pytest
 
 from src import pipeline
 from src.perso_api import PersoError, download_media, get_shared_project, media_url, parse_share_url
-from conftest import SAMPLE_VIDEO
+from conftest import SAMPLE_VIDEO, needs_sample_video
 from fake_perso import SHARE_TOKEN, SHARE_URL, SHARED_PROJECT, CopyingFakePerso, FakePerso
 from sample_results import make_results
 
@@ -129,6 +129,7 @@ def test_bad_link_makes_no_network_calls(isolated_output):
 
 
 @pytest.mark.slow
+@needs_sample_video
 def test_share_pipeline_end_to_end_on_sample(isolated_output):
     """Real Whisper + measurements on the sample video served through the fake share link."""
     # The "dub" is the English original itself, shared as an English "dub": a perfect pair.

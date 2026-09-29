@@ -21,6 +21,8 @@ htmlcov/
 
 # Downloaded videos, reports and results are written under data/ on every run.
 data/
+# Test media stays local (see tests/conftest.py); keeping videos out of git keeps clones small.
+tests/data/
 *.log
 
 # OS / editor

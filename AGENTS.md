@@ -27,7 +27,7 @@ python qa.py "<link>" --lang ko                                # report in Korea
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
-pytest                                                         # ~20 s, adds real Whisper runs on tests/data/sample.mp4
+pytest                                                         # ~20 s, adds real Whisper runs (need tests/data/sample.mp4)
 ```
 Other CLI options: `--no-lipsync`, `--no-translation-check`, `--whisper-model small`, `--script "…"` /
 `--script-file f.txt`, `--fail-on poor|check` (exit 1), `--verbose` (show MediaPipe logs). Exit codes: 0 done,
@@ -64,7 +64,7 @@ src/cli.py               Argument parsing, quiet native logs, exit codes
 src/face_landmarker.task MediaPipe face model (lip movement)
 tests/fake_perso.py      Fake share endpoint + media host, with a real response shape
 tests/sample_results.py  A realistic results dict (make_results) for report/CLI/UI tests
-tests/data/sample.mp4    28.7 s English talking-head clip used as fake share media in slow tests
+tests/data/sample.mp4    Local only (git-ignored): any ~30 s English talking-head MP4; the 2 slow tests skip without it
 data/output/             Run folders and results.json, created at run time (git-ignored)
 ```
 
@@ -131,7 +131,8 @@ data/output/             Run folders and results.json, created at run time (git-
 1. `pytest -m "not slow"` passes (and `pytest` before committing).
 2. New user-facing text exists in en/ko/pt/es.
 3. Docs match the change (`README.md`, `docs/*.md`, this file).
-4. `git status` shows no `.env`, videos or `data/` files.
+4. `git status` shows no `.env`, videos, `data/` or `tests/data/` files. Never commit videos: git keeps them in
+   history forever and every clone downloads them.
 5. Commit only when the user asks.
 
 ## Known limits

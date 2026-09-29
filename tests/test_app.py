@@ -7,7 +7,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from src import jobs, perso_api
-from conftest import PROJECT_ROOT
+from conftest import PROJECT_ROOT, needs_sample_video
 from fake_perso import SHARE_URL, SHARED_PROJECT
 from sample_results import make_results
 
@@ -141,6 +141,7 @@ def test_results_page_in_korean_translates_labels():
 
 
 @pytest.mark.slow
+@needs_sample_video
 def test_share_run_end_to_end_in_the_app(monkeypatch, isolated_output):
     """Start from the UI with a fake share link serving the sample video; the report appears when done."""
     from conftest import SAMPLE_VIDEO

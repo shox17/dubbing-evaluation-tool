@@ -7,8 +7,11 @@ import pytest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# A real 28.7 s English talking-head clip, served by the fake share link in the slow tests.
+# A short English talking-head clip served by the fake share link in the slow tests. It isn't in git (it would
+# make every clone ~30 MB bigger); put any ~30 s MP4 with clear English speech here to run those tests.
 SAMPLE_VIDEO = os.path.join(PROJECT_ROOT, "tests", "data", "sample.mp4")
+needs_sample_video = pytest.mark.skipif(not os.path.exists(SAMPLE_VIDEO),
+                                        reason="tests/data/sample.mp4 is missing (not in git; see tests/conftest.py)")
 
 
 def pytest_configure(config):
