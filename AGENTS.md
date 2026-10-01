@@ -10,7 +10,7 @@ deliver, with the reason.
 
 1. The share link's public endpoint (no key, no account, no credits) gives the original video and the dub.
 2. The tool downloads both (the lip-synced dub when there is one), then measures them: length, loudness, silence,
-   distortion, speaking pace, dub language, voice clarity (Whisper), voice quality (DNSMOS), speech timing, video file, lip movement
+   distortion, speaking pace, dub language, voice clarity (Whisper), voice quality (DNSMOS), voice similarity (speaker model), speech timing, video file, lip movement
    (experimental, lip-synced dubs only), and script accuracy when a script is passed to the CLI.
 3. Gemini (or Claude) checks the translation automatically when a key is set.
 4. `src/report.py` turns everything into a report: a verdict (Good / Needs review / Poor), every measure with a
@@ -71,6 +71,7 @@ src/intervals.py         Problem intervals: collect from every check, merge (< 0
 src/compare.py           Compare mode: facts, decide (the rule), build_comparison, text/HTML renderers (pure)
 src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
 src/voice_quality.py     Voice quality: DNSMOS P.835 on both tracks at the same moments, where both speak (ONNX)
+src/speaker.py           Voice similarity: WeSpeaker ONNX (downloaded once, SHA-256 pinned), numpy Kaldi fbank
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
@@ -119,6 +120,11 @@ output/                  The CLI's default --out folder (git-ignored)
   fall with background music, which both tracks share. It was chosen after UTMOS failed on real dubs (every real
   recording scored ~1.2-1.5, even after voice separation); don't swap in a studio-speech model without testing it on
   real Perso dubs. Window bands are in `src/intervals.py` (`VOICE_SIG_DROP`, `VOICE_OVRL_DROP`).
+- **Voice similarity is only measured on lines with a clean original background** (DNSMOS background ≥ 3.0):
+  music blurs voice fingerprints (on a real film even one actor's own lines scored < 0.45). It's Good or Check, never
+  Poor (a new voice can be deliberate). Line-level "different voice" intervals are relative to the dub's own median.
+  The model downloads on first use to `~/.cache/dubbing-qa/` (`DUBBING_QA_MODELS` overrides); tests never download
+  (`tests/conftest.py`).
 - Lip movement is measured automatically only when the dub is lip-synced, is always informational and never
   changes the verdict. Don't present its number as reliable (METRICS.md §3).
 - The app has no options or settings: lip movement and the translation check are automatic, the Whisper model
@@ -185,6 +191,8 @@ output/                  The CLI's default --out folder (git-ignored)
 - Whisper is seeded inside `transcribe` so results are repeatable; keep it that way (bump `CACHE_VERSION` in
   `src/evaluate.py` when cached Whisper results would change).
 - The job registry is in memory; restarting the app during a run loses tracking.
+- Voice similarity is not measured on music-heavy videos (by design); its bands come from synthetic voices (same voice
+  0.80-0.87 across languages, different voices median 0.13, max 0.57) and need real cloned dubs to confirm.
 - Voice quality misses a muffled (low-passed) voice, and its bands were set from damage simulated on two real dubs
   (clean dubs: at most 0.25 below the original; robotic/distorted stretches: 0.4-2.3 below).
 - Interval thresholds (long silence 2/4 s, loudness jump 10/16 dB, wrong language: original's 50/80%, other 80/95%) are first guesses checked on

@@ -8,6 +8,11 @@ _Initial review 2026-09-25. Updated 2026-09-29: the tool evaluates a dub from it
 - **Translation check (automatic):** Gemini (or Claude) compares both timestamped transcripts for meaning, missing or added content, names and numbers, and mistranslations. Issues the model flags as probable speech-recognition errors are listed but don't change levels. Without a key it's reported as not measured; it never fails the run.
 - **Report:** a verdict (Good / Needs review / Poor) with a one-line summary, six sections where every measure has a level, a plain explanation and the thresholds used, timestamped things to check (▶ jumps both videos there in the app), and a not-measured list with reasons. Saved as `report.html` (standalone, shareable), `report.json` and `report.txt` in every run folder.
 
+## Voice similarity (2026-10-01)
+- New measure **Voice similarity** (WeSpeaker ResNet34-LM ONNX, downloaded once with a pinned hash; numpy Kaldi filterbank so no torchaudio): each original line vs the dub at the same moment, only where the original's background is quiet; Good ≥ 50% else Check; lines much less similar than the rest become "different voice" intervals.
+- **Validated** with a synthetic two-speaker scene (English original, Spanish dub lines): good clone 0.84, stock voice 0.15, a similar wrong voice on one line and a cross-gender swap both flagged at the right line. On the two real film dubs every line had loud music under it, so it's honestly reported as not measured.
+- **Rejected for now:** pitch matching (pyin tracked the film's music, e.g. 60–64 Hz and a male actor at 211 Hz). Worth revisiting on clean-background lines.
+
 ## Voice quality (2026-10-01)
 - New measure **Voice quality** (DNSMOS P.835, bundled 1.1 MB ONNX model, onnxruntime, ~4 s per 60 s dub on CPU): the dub is scored against the original at the same moments where both speak, per ~9 s stretch, on speech (SIG) and overall (OVRL); the worst stretch sets the level and flagged stretches become intervals.
 - **Validated by simulated damage** on two real EN→ES dubs (20 s of each dub degraded): robotic quantisation and clipping distortion are flagged in the right place; clean dubs stay ≥ 0.35 inside the bands. Muffling is not detected (documented blind spot).

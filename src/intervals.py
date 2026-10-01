@@ -23,6 +23,9 @@ LANG_OTHER = (0.8, 0.95)             # any other language: stricter, because Whi
 LANG_EXPECTED_MAX = 0.2              # ...in both cases only while the expected language stays below this
 VOICE_SIG_DROP = (0.6, 1.0)          # dub speech score below the original's in the same window: Check / Poor...
 VOICE_OVRL_DROP = (0.5, 0.9)         # ...or its overall score (clean real dubs: at most 0.25 below)
+VOICE_CHANGE_DROP = 0.2              # a line this far below the dub's typical voice similarity...
+VOICE_CHANGE_MAX = 0.65              # ...and below this (similar voices of two people reach ~0.55)...
+VOICE_CHANGE_MEDIAN = 0.45           # ...in a dub that otherwise clones its speakers: another voice on that line
 LINE_MATCH_SEC = 1.0                 # a translation issue belongs to the original line starting this close to it
 JUDGE_DEFAULT_SEC = 2.0              # length of a translation issue when no transcript line contains it
 
@@ -39,6 +42,7 @@ CATEGORIES = {
     "names_numbers": "r.cat.name_or_number",
     "unclear_speech": "r.cat.clarity",
     "voice_quality": "r.cat.voice_quality",
+    "voice_change": "r.cat.voice_change",
 }
 JUDGE_CATEGORY = {"missing": "missing_speech", "added": "added_speech", "mistranslation": "mistranslation",
                   "name_or_number": "names_numbers"}
@@ -160,6 +164,17 @@ def _voice(tr: Tr, vq: Optional[dict]) -> list[dict]:
     return out
 
 
+def _voice_change(tr: Tr, vs: Optional[dict]) -> list[dict]:
+    """Lines whose dub voice doesn't match the original speaker while the rest of the dub does (a wrong voice)."""
+    if not (vs or {}).get("measured") or vs["median"] < VOICE_CHANGE_MEDIAN:
+        return []
+    return [_item(tr, l["start"], l["end"], "voice_change", "check", "voice_similarity",
+                  tr("r.int.voice_change", sim=f"{max(0.0, l['similarity']) * 100:.0f}%",
+                     median=f"{vs['median'] * 100:.0f}%"))
+            for l in vs["lines"]
+            if l["similarity"] <= vs["median"] - VOICE_CHANGE_DROP and l["similarity"] < VOICE_CHANGE_MAX]
+
+
 def _clarity(tr: Tr, sr: dict) -> list[dict]:
     """Stretches of the dub that speech recognition could not understand confidently."""
     return [_item(tr, s["start"], s["end"], "unclear_speech", "check", "clarity", tr("r.todo.unclear", text=s["text"]))
@@ -268,7 +283,8 @@ def build_intervals(r: dict, tr: Tr, lang: str, clipping_poor: bool = False, dub
     names = {base_lang(k): v for k, v in names.items() if k and v}
     counted, asr = _translation(tr, r.get("translation_judge"), sr, lang)
     counted += _timing(tr, r.get("timing_alignment") or {}) + _distortion(tr, ac, clipping_poor) + _loudness(tr, ac) \
-        + _language(tr, sr, expected, source, names) + _clarity(tr, sr) + _voice(tr, r.get("voice_quality"))
+        + _language(tr, sr, expected, source, names) + _clarity(tr, sr) + _voice(tr, r.get("voice_quality")) \
+        + _voice_change(tr, r.get("voice_similarity"))
     length = video_length(r)
     intervals = merge_intervals(counted, length)
     asr = sorted(({**a, **dict(zip(("start", "end"), _clip(a["start"], a["end"], length)))} for a in asr),

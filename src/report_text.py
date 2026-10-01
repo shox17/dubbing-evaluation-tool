@@ -24,6 +24,8 @@ REPORT_TEXT = {
     "r.m.completeness": {"en": "Missing or added content", "ko": "누락·추가된 내용", "pt": "Conteúdo faltando ou a mais",
                          "es": "Contenido que falta o sobra"},
     "r.m.voice_quality": {"en": "Voice quality", "ko": "목소리 품질", "pt": "Qualidade da voz", "es": "Calidad de la voz"},
+    "r.m.voice_similarity": {"en": "Voice similarity", "ko": "목소리 유사도", "pt": "Semelhança da voz",
+                             "es": "Parecido de la voz"},
     "r.m.names_numbers": {"en": "Names and numbers", "ko": "이름과 숫자", "pt": "Nomes e números", "es": "Nombres y números"},
     "r.m.mistranslations": {"en": "Mistranslations", "ko": "오역", "pt": "Erros de tradução", "es": "Errores de traducción"},
     "r.m.file_check": {"en": "Video file", "ko": "영상 파일", "pt": "Arquivo de vídeo", "es": "Archivo de video"},
@@ -766,6 +768,93 @@ REPORT_TEXT = {
               "Revisar cuando la voz del doblaje queda {sig} o más por debajo de la original o todo el sonido {ovr} o "
               "más, Deficiente desde {sig_poor} / {ovr_poor}. El peor tramo fija el nivel. Una voz apagada no se "
               "detecta.",
+    },
+    "r.cat.voice_change": {"en": "different voice", "ko": "다른 목소리", "pt": "voz diferente", "es": "voz distinta"},
+    "r.int.voice_change": {
+        "en": "This line's dub voice doesn't sound like the original speaker ({sim} alike) while the rest of the dub "
+              "does ({median}). The line may have been given another character's voice.",
+        "ko": "이 문장의 더빙 목소리는 원래 화자와 닮지 않았습니다(유사도 {sim}, 나머지 더빙은 {median}). 다른 인물의 "
+              "목소리가 배정됐을 수 있습니다.",
+        "pt": "A voz da dublagem nesta fala não se parece com a do falante original ({sim}), embora o resto pareça "
+              "({median}). A fala pode ter recebido a voz de outro personagem.",
+        "es": "La voz del doblaje en esta frase no se parece al hablante original ({sim}), aunque el resto sí "
+              "({median}). Puede que la frase recibiera la voz de otro personaje.",
+    },
+    "r.vs.display": {"en": "{sim} alike · {n} lines", "ko": "유사도 {sim} · {n}문장", "pt": "{sim} parecida · {n} falas",
+                     "es": "{sim} de parecido · {n} frases"},
+    "r.vs.good": {
+        "en": "The dub voices sound like the original speakers ({sim} alike, typical over {n} lines compared at the "
+              "same moments). The voice cloning kept each speaker recognisable.",
+        "ko": "더빙 목소리가 원래 화자와 닮았습니다(같은 순간에 비교한 {n}문장의 대표 유사도 {sim}). 음성 복제가 각 화자를 "
+              "알아볼 수 있게 유지했습니다.",
+        "pt": "As vozes da dublagem se parecem com as dos falantes originais ({sim} de semelhança típica em {n} falas "
+              "comparadas nos mesmos momentos). A clonagem manteve cada falante reconhecível.",
+        "es": "Las voces del doblaje se parecen a las de los hablantes originales ({sim} de parecido típico en {n} "
+              "frases comparadas en los mismos momentos). La clonación mantuvo reconocible a cada hablante.",
+    },
+    "r.vs.check": {
+        "en": "The dub voices don't sound much like the original speakers ({sim} alike, typical over {n} lines). That's "
+              "expected if a different voice was chosen on purpose; if the voice should be cloned, check the voice "
+              "settings.",
+        "ko": "더빙 목소리가 원래 화자와 그다지 닮지 않았습니다({n}문장의 대표 유사도 {sim}). 일부러 다른 목소리를 골랐다면 "
+              "정상이지만, 목소리를 복제해야 한다면 음성 설정을 확인하세요.",
+        "pt": "As vozes da dublagem não se parecem muito com as dos falantes originais ({sim} de semelhança típica em "
+              "{n} falas). É esperado se outra voz foi escolhida de propósito; se a voz deveria ser clonada, revise a "
+              "configuração.",
+        "es": "Las voces del doblaje no se parecen mucho a las de los hablantes originales ({sim} de parecido típico "
+              "en {n} frases). Es normal si se eligió otra voz a propósito; si la voz debía clonarse, revisa la "
+              "configuración.",
+    },
+    "r.g.vs": {
+        "en": "A speaker-recognition model compares the voice of each original line (2 s or longer, with a quiet "
+              "background) with the dub at the same moment. The same voice scores about 80%, two different people "
+              "about 10%. Good from {good}, otherwise Check (never Poor: a new voice can be a deliberate choice).",
+        "ko": "화자 인식 모델이 원본의 각 문장(2초 이상, 배경이 조용한 부분)의 목소리를 같은 순간의 더빙과 비교합니다. "
+              "같은 목소리는 약 80%, 서로 다른 사람은 약 10%입니다. {good}부터 좋음, 그 아래는 확인 필요입니다(일부러 "
+              "다른 목소리를 고를 수 있어 미흡은 없음).",
+        "pt": "Um modelo de reconhecimento de falante compara a voz de cada fala original (2 s ou mais, com fundo "
+              "silencioso) com a dublagem no mesmo momento. A mesma voz dá cerca de 80%, duas pessoas diferentes cerca "
+              "de 10%. Bom a partir de {good}, senão Verificar (nunca Ruim: outra voz pode ser uma escolha).",
+        "es": "Un modelo de reconocimiento de hablante compara la voz de cada frase original (2 s o más, con fondo "
+              "tranquilo) con el doblaje en el mismo momento. La misma voz da cerca del 80%, dos personas distintas "
+              "cerca del 10%. Bien desde {good}, si no Revisar (nunca Deficiente: otra voz puede ser una elección).",
+    },
+    "r.vs.noisy": {
+        "en": "The original's background (music, effects or noise) is too loud under the dialogue to compare voices "
+              "reliably, so voice similarity wasn't measured.",
+        "ko": "원본의 대사 아래 배경(음악, 효과음, 소음)이 너무 커서 목소리를 믿을 만하게 비교할 수 없어 목소리 유사도를 "
+              "측정하지 않았습니다.",
+        "pt": "O fundo do original (música, efeitos ou ruído) está alto demais sob os diálogos para comparar vozes com "
+              "confiança, então a semelhança da voz não foi medida.",
+        "es": "El fondo del original (música, efectos o ruido) suena demasiado fuerte bajo los diálogos para comparar "
+              "voces con fiabilidad, así que no se midió el parecido de la voz.",
+    },
+    "r.vs.few_lines": {
+        "en": "There are fewer than two original lines of 2 seconds or more to compare, so voice similarity wasn't "
+              "measured.",
+        "ko": "비교할 2초 이상의 원본 문장이 두 개 미만이라 목소리 유사도를 측정하지 않았습니다.",
+        "pt": "Há menos de duas falas originais de 2 segundos ou mais para comparar, então a semelhança da voz não foi "
+              "medida.",
+        "es": "Hay menos de dos frases originales de 2 segundos o más para comparar, así que no se midió el parecido "
+              "de la voz.",
+    },
+    "r.vs.no_model": {
+        "en": "The speaker-recognition model (26 MB, downloaded once) couldn't be downloaded, so voice similarity "
+              "wasn't measured. Check the internet connection and run again.",
+        "ko": "화자 인식 모델(26 MB, 한 번만 다운로드)을 받지 못해 목소리 유사도를 측정하지 않았습니다. 인터넷 연결을 "
+              "확인하고 다시 실행하세요.",
+        "pt": "O modelo de reconhecimento de falante (26 MB, baixado uma vez) não pôde ser baixado, então a semelhança "
+              "da voz não foi medida. Verifique a internet e rode de novo.",
+        "es": "No se pudo descargar el modelo de reconocimiento de hablante (26 MB, se descarga una vez), así que no "
+              "se midió el parecido de la voz. Revisa la conexión y vuelve a ejecutar.",
+    },
+    "r.vs.error": {
+        "en": "The speaker-recognition model couldn't run on this machine, so voice similarity wasn't measured.",
+        "ko": "이 컴퓨터에서 화자 인식 모델을 실행하지 못해 목소리 유사도를 측정하지 않았습니다.",
+        "pt": "O modelo de reconhecimento de falante não pôde rodar nesta máquina, então a semelhança da voz não foi "
+              "medida.",
+        "es": "El modelo de reconocimiento de hablante no pudo ejecutarse en este equipo, así que no se midió el "
+              "parecido de la voz.",
     },
     "r.vq.no_common_speech": {
         "en": "The original and the dub don't speak at the same time long enough to compare their voices.",

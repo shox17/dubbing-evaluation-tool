@@ -27,6 +27,7 @@ LANGUAGE_PROB = 0.5                      # below this the language guess is unce
 OVERLAP_PCT = (75.0, 55.0)               # speech-timing overlap; a real Perso EN→KO dub scores ~81%
 SCRIPT_PCT = (80.0, 50.0)                # accuracy against a script
 MEANING_SCORE = (4, 3)                   # LLM judge, 1-5
+VOICE_SIMILAR = 0.5                      # voice similarity to the original speaker: Good from this, else Check
 VOICE_FLOOR = 1.6                        # voice quality: an original scoring below this (1-5) is too noisy to compare
 # Voice-quality window bands (how far the dub may fall below the original) are in src/intervals.py.
 
@@ -155,7 +156,21 @@ def _voice(tr: Tr, vq: Optional[dict]) -> dict:
                       sig_poor=f"{VOICE_SIG_DROP[1]:g}", ovr_poor=f"{VOICE_OVRL_DROP[1]:g}"))
 
 
-def _speech(tr: Tr, sr: dict, lang: str, lang_name: str, vq: Optional[dict] = None) -> list[dict]:
+def _similarity(tr: Tr, vs: Optional[dict]) -> dict:
+    """How much the dub voice sounds like the original speaker, line by line (never Poor: a new voice may be chosen)."""
+    if not vs:
+        return _na(tr, "voice_similarity", tr("r.vq.old"))
+    if not vs.get("measured"):
+        return _na(tr, "voice_similarity", tr(vs.get("reason_key") or "r.vs.error"))
+    med, n = vs["median"], len(vs["lines"])
+    level = "good" if med >= VOICE_SIMILAR else "check"
+    pct = f"{max(0.0, med) * 100:.0f}%"
+    return _metric(tr, "voice_similarity", level, tr(f"r.vs.{level}", sim=pct, n=n), med,
+                   tr("r.vs.display", sim=pct, n=n), tr("r.g.vs", good=f"{VOICE_SIMILAR * 100:.0f}%"))
+
+
+def _speech(tr: Tr, sr: dict, lang: str, lang_name: str, vq: Optional[dict] = None,
+            vs: Optional[dict] = None) -> list[dict]:
     """Right language, how clearly the voice is recognised, and script accuracy when a script exists."""
     rows = []
     expected = whisper_language(lang)
@@ -187,6 +202,7 @@ def _speech(tr: Tr, sr: dict, lang: str, lang_name: str, vq: Optional[dict] = No
                             tr("r.g.clarity", good=f"{CLARITY_PCT[0]:g}", check=f"{CLARITY_PCT[1]:g}")))
 
     rows.append(_voice(tr, vq))
+    rows.append(_similarity(tr, vs))
     if sr.get("accuracy_pct") is not None:
         acc = sr["accuracy_pct"]
         rows.append(_metric(tr, "script_accuracy", _band_min(acc, SCRIPT_PCT), tr("r.script", acc=f"{acc:.0f}%"),
@@ -339,7 +355,7 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE, dub: Optional[str] = 
         project["evaluated_video"] = tr("r.evaluated." + ("lipsync" if project["is_lipsync"] else "dub"))
     sections = [
         {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code, lang_name)},
-        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name, r.get("voice_quality"))},
+        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name, r.get("voice_quality"), r.get("voice_similarity"))},
         {"id": "alignment", "metrics": _alignment(tr, r.get("timing_alignment") or {})},
         {"id": "translation", "metrics": _translation(tr, tj, lang), "note": tr("r.note.translation")},
         {"id": "integrity", "metrics": _integrity(tr, r.get("video_integrity"))},
