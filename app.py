@@ -17,7 +17,7 @@ import streamlit as st
 
 from src.evaluate import CER_LANGS, SCHEMA_VERSION, base_lang
 from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
-from src import i18n, perso_api
+from src import history, i18n, perso_api
 from src.jobs import get_job, start_job
 from src.perso_api import PersoError, media_url, parse_share_url
 from src.compare import build_ranking, render_comparison_html
@@ -152,6 +152,8 @@ with st.sidebar:
     with st.expander(t("how.title"), icon=":material/help:"):
         st.markdown(t("how.body"))
 
+    st.button(t("h.open"), icon=":material/monitoring:", width="stretch", key="open_history",
+              on_click=lambda: (st.query_params.clear(), st.session_state.update(view="history")))
     saved = load_results()
     if saved and saved.get("schema_version") == RESULTS_SCHEMA_VERSION and st.session_state.get("view") not in ("results", "compare"):
         st.button(t("sidebar.last_result"), icon=":material/history:", width="stretch", on_click=open_results, args=(saved,))
@@ -590,6 +592,58 @@ def render_comparison(run: dict):
     st.caption(lb["footer"])
 
 
+# ---------------- history ----------------
+def render_history():
+    """History page: totals, a weekly verdict chart, language pairs, the most frequent problems, recent runs."""
+    st.title(t("h.title"), icon=":material/monitoring:")
+    periods = {0: t("h.all_time"), 7: t("h.last_days", n=7), 30: t("h.last_days", n=30), 90: t("h.last_days", n=90)}
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    days = c1.selectbox(t("h.days"), list(periods), format_func=periods.get, key="history_days")
+    c2.button(t("back"), icon=":material/arrow_back:", on_click=new_evaluation, width="stretch")
+    summary = history.summarize(history.load(), days=days or None)
+    if not summary["dubs"]:
+        st.info(t("h.empty"), icon=":material/history:")
+        return
+    v = summary["verdicts"]
+    with st.container(horizontal=True):
+        st.metric(t("h.dubs"), summary["dubs"], border=True)
+        st.metric(t("h.good_pct"), f"{summary['good_pct']:.0f}%", border=True)
+        st.metric(t("verdict.check"), v["check"], border=True)
+        st.metric(t("verdict.poor"), v["poor"], border=True)
+    st.caption(t("h.totals", runs=summary["runs"], dubs=summary["dubs"], good=v["good"], check=v["check"],
+                 poor=v["poor"], pct=f"{summary['good_pct']:.0f}"))
+
+    order = [t("verdict.good"), t("verdict.check"), t("verdict.poor")]
+    rows = [{"week": w["week"], "verdict": t(f"verdict.{lv}"), "dubs": w[lv]}
+            for w in summary["weekly"] for lv in ("good", "check", "poor") if w[lv]]
+    st.markdown(f"**:material/bar_chart: {t('h.weekly')}**")
+    st.vega_lite_chart({"data": {"values": rows}, "mark": {"type": "bar", "cornerRadius": 2},
+                        "encoding": {"x": {"field": "week", "type": "ordinal", "title": t("h.week")},
+                                     "y": {"field": "dubs", "type": "quantitative", "title": t("h.dubs")},
+                                     "color": {"field": "verdict", "type": "nominal", "sort": order, "title": None,
+                                               "scale": {"domain": order, "range": ["#2e9e5b", "#e09b2d", "#d64545"]}},
+                                     "order": {"field": "verdict", "sort": "ascending"}}}, width="stretch", height=220)
+
+    st.markdown(f"**:material/translate: {t('h.pairs')}**")
+    st.dataframe(pd.DataFrame([(p["languages"], p["dubs"], p["good"], p["check"], p["poor"],
+                                None if p["overlap_pct"] is None else p["overlap_pct"],
+                                None if p["meaning_score"] is None else p["meaning_score"]) for p in summary["pairs"]],
+                              columns=[t("h.pair"), t("h.dubs"), *order, t("h.timing"), t("h.meaning")]),
+                 hide_index=True, width="stretch")
+    st.markdown(f"**:material/report: {t('h.problems')}**")
+    if summary["problems"]:
+        st.dataframe(pd.DataFrame([(t("r.m." + x["measure"]), x["poor"], x["check"]) for x in summary["problems"]],
+                                  columns=[t("table.measure"), t("verdict.poor"), t("verdict.check")]),
+                     hide_index=True, width="stretch")
+    else:
+        st.caption(t("h.no_problems"))
+    st.markdown(f"**:material/history: {t('h.recent')}**")
+    st.dataframe(pd.DataFrame([(r["time"][:16], t("verdict." + r["verdict"]), r["title"], r["languages"], r["mode"])
+                               for r in summary["recent"]],
+                              columns=[t("h.when"), t("c.verdict"), t("c.meta.title"), t("h.pair"), t("h.mode")]),
+                 hide_index=True, width="stretch")
+
+
 # ---------------- router ----------------
 job = get_job(st.query_params.get("job"))
 if job is not None and job.status == "running":
@@ -615,5 +669,7 @@ elif st.session_state.get("view") == "results" and st.session_state.get("results
     render_results(st.session_state.results)
 elif st.session_state.get("view") == "compare" and st.session_state.get("compare_run"):
     render_comparison(st.session_state.compare_run)
+elif st.session_state.get("view") == "history":
+    render_history()
 else:
     render_setup()

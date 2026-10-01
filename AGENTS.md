@@ -31,6 +31,7 @@ python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report (Kor
 python qa.py "<link>" --out ./output --lang en                 # another folder / language (ko | en | es | pt)
 python qa.py compare "<link A>" "<link B>" [<C> ...] --out ./output  # rank 2-8 dubs, recommend one
 python qa.py batch links.txt --out ./output/batch                # many links → summary.csv (+ agreement with your labels)
+python qa.py history --days 30                                    # every past evaluation: totals, pairs, trends
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
@@ -73,6 +74,7 @@ src/compare.py           Compare mode: facts, decide (the rule), build_compariso
 src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
 src/voice_quality.py     Voice quality: DNSMOS P.835 on both tracks at the same moments, where both speak (ONNX)
 src/speaker.py           Voice similarity: WeSpeaker ONNX (downloaded once, SHA-256 pinned), numpy Kaldi fbank
+src/history.py           Records every evaluation to data/history.jsonl; summarize() and the history text view
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
@@ -86,6 +88,7 @@ tests/data/sample.mp4    Local only (git-ignored): any ~30 s English talking-hea
 data/output/             App run folders and results.json, created at run time (git-ignored)
 data/cache/              Per share link: downloaded videos + whisper_cache.json (git-ignored)
 output/                  The CLI's default --out folder (git-ignored)
+data/history.jsonl       Evaluation history, one JSON line per evaluated dub (git-ignored)
 ```
 
 ## Rules
@@ -95,6 +98,7 @@ output/                  The CLI's default --out folder (git-ignored)
   keys). Reference: https://developers.perso.ai/llms.txt.
 - **Secrets:** never print, log, commit or read the values of `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`; they live
   in the git-ignored `.env`. Send the Gemini key only in the `x-goog-api-key` header, never in a URL.
+- **History recording never fails a run** (errors are logged), and tests write it to a temp file (`tests/conftest.py`).
 - **Tests never call real services.** Perso: `tests/fake_perso.py`. Gemini/Claude: `tests/conftest.py` removes
   provider keys from the environment and stubs the pipeline's translation check; judge tests use fake sessions
   and clients. Keep it that way.

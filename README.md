@@ -130,6 +130,14 @@ https://perso.ai/…?seq=…,poor
 ```
 The summary then shows how often the tool agrees with you, whether it is stricter or more lenient, and a person × tool table. Use the CSV to see which measure drove each disagreement before you change a threshold.
 
+### History and trends
+Every evaluation (app, command line, compare and batch) is added to `data/history.jsonl` on your machine. See it with **History** in the app's sidebar (period filter, weekly verdict chart, language pairs, most frequent problems, latest runs), or:
+```bash
+python qa.py history --days 30 --lang en          # summary in the terminal
+python qa.py history --csv history.csv            # every recorded evaluation as a spreadsheet
+```
+Reruns of the same link count once in the totals (the latest run wins).
+
 ### The command line
 ```bash
 python qa.py "<share link>"                        # text report on screen (Korean by default), files in ./output
@@ -185,6 +193,7 @@ src/perso_api.py         Share links: parse the link, read the public project, d
 src/pipeline.py          Share link → download (cached) → evaluate → translation check → report files; compare mode
 src/compare.py           Compare mode: decision rule, comparison model, text and HTML renderers (pure)
 src/intervals.py         Problem intervals: collect, merge, clip, round, sort (pure)
+src/history.py           Evaluation history: record every run, summaries and trends
 src/batch.py             Batch mode: input file, summary rows, agreement with your verdicts (pure)
 src/version.py           Tool version printed in comparisons
 src/evaluate.py          All measurements (pure functions, no file writes)
@@ -200,6 +209,7 @@ tests/                   pytest suite; tests/fake_perso.py fakes the share endpo
                          English talking-head clip) is local test media, not in git; slow tests skip without it
 data/cache/<link>/       Downloaded videos and Whisper results per share link (not committed)
 data/output/runs/<id>/   Report files of each app run (not committed)
+data/history.jsonl       Every evaluation, one line each (not committed)
 output/                  The command line's default --out folder (not committed)
 docs/                    Architecture, metrics, engineering review
 AGENTS.md                Guide and rules for AI coding agents (Codex reads it; CLAUDE.md imports it)

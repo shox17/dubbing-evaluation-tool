@@ -1311,4 +1311,46 @@ REPORT_TEXT = {
         "es": "Añade tu resultado después de un enlace (enlace,good / check / poor) para ver cuánto coincide la "
               "herramienta contigo.",
     },
+
+    # ----- history (src/history.py) -----
+    "h.title": {"en": "Evaluation history", "ko": "평가 기록", "pt": "Histórico de avaliações", "es": "Historial de evaluaciones"},
+    "h.empty": {"en": "No evaluations recorded yet. Every evaluation you run is added here.",
+                "ko": "아직 기록된 평가가 없습니다. 평가를 실행할 때마다 여기에 추가됩니다.",
+                "pt": "Nenhuma avaliação registrada ainda. Cada avaliação que você fizer aparece aqui.",
+                "es": "Todavía no hay evaluaciones registradas. Cada evaluación que hagas se añade aquí."},
+    "h.totals": {
+        "en": "{runs} runs on {dubs} dubs (reruns of a link count once): {good} Good · {check} Needs review · {poor} "
+              "Poor. {pct}% passed every automatic check.",
+        "ko": "더빙 {dubs}개에 대해 {runs}번 실행(같은 링크의 재실행은 한 번으로 계산): 좋음 {good} · 검토 필요 {check} · "
+              "미흡 {poor}. {pct}%가 모든 자동 검사를 통과했습니다.",
+        "pt": "{runs} execuções em {dubs} dublagens (reexecuções de um link contam uma vez): {good} Bom · {check} Requer "
+              "revisão · {poor} Ruim. {pct}% passaram em todas as verificações automáticas.",
+        "es": "{runs} ejecuciones sobre {dubs} doblajes (las repeticiones de un enlace cuentan una vez): {good} Bien · "
+              "{check} Requiere revisión · {poor} Deficiente. El {pct}% pasó todas las comprobaciones automáticas.",
+    },
+    "h.pairs": {"en": "By language pair", "ko": "언어 쌍별", "pt": "Por par de idiomas", "es": "Por par de idiomas"},
+    "h.pair": {"en": "Languages", "ko": "언어", "pt": "Idiomas", "es": "Idiomas"},
+    "h.dubs": {"en": "Dubs", "ko": "더빙 수", "pt": "Dublagens", "es": "Doblajes"},
+    "h.timing": {"en": "Timing (avg)", "ko": "타이밍(평균)", "pt": "Tempo (média)", "es": "Momento (media)"},
+    "h.meaning": {"en": "Meaning (avg)", "ko": "의미(평균)", "pt": "Sentido (média)", "es": "Sentido (media)"},
+    "h.problems": {"en": "Most frequent problems", "ko": "가장 자주 나오는 문제", "pt": "Problemas mais frequentes",
+                   "es": "Problemas más frecuentes"},
+    "h.problem_counts": {"en": "Poor in {poor} dubs, Check in {check}", "ko": "미흡 {poor}개, 확인 필요 {check}개",
+                         "pt": "Ruim em {poor} dublagens, Verificar em {check}",
+                         "es": "Deficiente en {poor} doblajes, Revisar en {check}"},
+    "h.no_problems": {"en": "No measure was Check or Poor.", "ko": "확인 필요나 미흡 항목이 없습니다.",
+                      "pt": "Nenhuma medida ficou em Verificar ou Ruim.", "es": "Ninguna medida quedó en Revisar o Deficiente."},
+    "h.weekly": {"en": "Week by week (█ Good ▒ Needs review ░ Poor)", "ko": "주별 추이(█ 좋음 ▒ 검토 필요 ░ 미흡)",
+                 "pt": "Semana a semana (█ Bom ▒ Requer revisão ░ Ruim)", "es": "Semana a semana (█ Bien ▒ Requiere revisión ░ Deficiente)"},
+    "h.week_counts": {"en": "{n} dubs: {good} / {check} / {poor}", "ko": "더빙 {n}개: {good} / {check} / {poor}",
+                      "pt": "{n} dublagens: {good} / {check} / {poor}", "es": "{n} doblajes: {good} / {check} / {poor}"},
+    "h.recent": {"en": "Latest evaluations", "ko": "최근 평가", "pt": "Avaliações recentes", "es": "Evaluaciones recientes"},
+    "h.week": {"en": "Week", "ko": "주", "pt": "Semana", "es": "Semana"},
+    "h.when": {"en": "When", "ko": "시각", "pt": "Quando", "es": "Cuándo"},
+    "h.mode": {"en": "From", "ko": "실행 방식", "pt": "Origem", "es": "Origen"},
+    "h.days": {"en": "Period", "ko": "기간", "pt": "Período", "es": "Período"},
+    "h.all_time": {"en": "All time", "ko": "전체", "pt": "Tudo", "es": "Todo"},
+    "h.last_days": {"en": "Last {n} days", "ko": "최근 {n}일", "pt": "Últimos {n} dias", "es": "Últimos {n} días"},
+    "h.good_pct": {"en": "Passed", "ko": "통과율", "pt": "Aprovadas", "es": "Aprobados"},
+    "h.open": {"en": "History", "ko": "평가 기록", "pt": "Histórico", "es": "Historial"},
 }

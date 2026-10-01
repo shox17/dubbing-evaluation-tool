@@ -18,6 +18,7 @@ from typing import Callable, Optional
 from dotenv import load_dotenv
 
 from src.batch import agreement, render_batch_text, summary_row, to_csv
+from src import history
 from src.compare import LABELS, build_ranking, render_comparison_html, render_comparison_text
 from src.evaluate import run_full_evaluation, DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
@@ -320,6 +321,7 @@ def run_share_evaluation(
     out_dir: Optional[str] = None,
     original: Optional[str] = None,
     use_cache: bool = True,
+    history_mode: str = "single",
     session=None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
@@ -343,6 +345,7 @@ def run_share_evaluation(
         folder = out_dir
     results["pipeline"]["report_files"] = save_report_files(results, folder)
     save_results(results)
+    history.record(results, history_mode)
     return results
 
 
@@ -404,6 +407,8 @@ def run_comparison(
     for dub in comp["dubs"]:
         results[dub]["report"] = comp["reports"][dub]
     files = save_comparison_files(comp, results, out_dir)
+    for dub in comp["dubs"]:
+        history.record(results[dub], "compare")
     outer("compare", "Comparing the dubs...", 1.0)
     return {"comparison": comp, "results": results, "files": files}
 
@@ -424,7 +429,7 @@ def run_batch(entries: list[dict], out_dir: str, report_lang: str = "ko",
         try:
             results = run_share_evaluation(entry["link"], report_lang=report_lang, out_dir=str(folder / f"{n:03d}"),
                                            report=inner, cancel_event=cancel_event, session=session, sleep=sleep,
-                                           **options)
+                                           history_mode="batch", **options)
             rows.append(summary_row(n, entry, results))
         except Cancelled:
             raise

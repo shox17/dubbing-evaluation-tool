@@ -3,6 +3,7 @@
     python qa.py "<share link>" --out ./output --lang ko
     python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
     python qa.py batch links.txt --out ./output/batch       (one link per line, optionally ",good|check|poor")
+    python qa.py history --days 30                          (every past evaluation: totals, language pairs, trends)
 
 Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
 mode saves comparison.* plus report_A.* and report_B.*.
@@ -83,6 +84,19 @@ def parse_batch_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def parse_history_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for the history view."""
+    ap = argparse.ArgumentParser(prog="qa.py history", description="Summarize every past evaluation: totals, verdicts "
+                                 "per language pair, the most frequent problems and a weekly trend.")
+    ap.add_argument("--days", type=int, help="Only the last N days")
+    ap.add_argument("--lang", choices=LANGS, default="ko", help="Language (default ko)")
+    ap.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    ap.add_argument("--csv", help="Also write every recorded evaluation to this CSV file")
+    args = ap.parse_args(argv)
+    args.mode, args.verbose = "history", True
+    return args
+
+
 @contextlib.contextmanager
 def quiet_native_stderr(enabled: bool):
     """Sends C++ library logs (MediaPipe writes straight to fd 2) to the null device; yields a stream for our messages."""
@@ -121,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     use_utf8_console()
     argv = sys.argv[1:] if argv is None else argv
-    parsers = {"compare": parse_compare_args, "batch": parse_batch_args}
+    parsers = {"compare": parse_compare_args, "batch": parse_batch_args, "history": parse_history_args}
     args = parsers[argv[0]](argv[1:]) if argv[:1] and argv[0] in parsers else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
@@ -148,8 +162,28 @@ def _progress(err):
     return progress
 
 
+def _run_history(args: argparse.Namespace, err) -> int:
+    """Prints the history summary (and writes the CSV when asked)."""
+    import csv
+    from src import history
+    records = history.load()
+    summary = history.summarize(records, days=args.days)
+    print(json.dumps(summary, ensure_ascii=False, indent=2) if args.json else history.render_history_text(summary, args.lang))
+    if args.csv:
+        fields = ["time", "mode", "title", "languages", "language_pair", "lipsync", "verdict", "poor", "check",
+                  "problem_seconds", "meaning_score", "overlap_pct", "link", "seq", "tool_version", "report"]
+        with open(args.csv, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(records)
+        print(f"\nSaved: {args.csv}", file=err)
+    return 0
+
+
 def _run(args: argparse.Namespace, err) -> int:
     """The evaluation or comparison itself, printing progress and errors to err."""
+    if args.mode == "history":
+        return _run_history(args, err)
     script = getattr(args, "script", None)
     if getattr(args, "script_file", None):
         try:

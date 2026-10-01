@@ -261,3 +261,24 @@ def test_comparison_page_with_three_dubs_shows_the_ranking():
     text = all_text(at)
     assert "Deliver Dub B." in text and "**Ranking:** 1. Dub B" in text and "3. Dub A" in text
     assert at.button(key="seek_C_0").label == "19.4s"
+
+
+def test_history_page_shows_totals_pairs_and_recent_runs():
+    from src import history
+    from src.report import build_report
+    for sections in ({}, {"acoustic_metrics": {"dubbed_duration_sec": 40.0}}):
+        r = make_results(**sections)
+        r["report"] = build_report(r)
+        history.record(r, "single")
+    at = app()
+    at.button(key="open_history").click().run()
+    assert not at.exception and at.title[0].value == "Evaluation history"
+    assert "2 runs on 1 dubs" in all_text(at)                         # same link twice: counts once
+    assert len(at.dataframe) == 3                                       # pairs, problems, recent
+    at.selectbox(key="history_days").set_value(7).run()
+    assert not at.exception
+
+
+def test_history_page_without_records_says_so():
+    at = app(view="history")
+    assert "No evaluations recorded yet" in all_text(at)
