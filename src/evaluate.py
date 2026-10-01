@@ -574,6 +574,19 @@ def _voice_quality(y_orig: np.ndarray, y_dub: np.ndarray, orig_speech: list, dub
         return vq.not_measured("r.vq.error")
 
 
+def _voice_similarity(y_orig: np.ndarray, y_dub: np.ndarray, segments: list) -> dict:
+    """Voice similarity per original line (src/speaker.py); a model that can't be downloaded or run is not measured."""
+    from src import speaker, voice_quality
+    try:
+        return speaker.voice_similarity(y_orig, y_dub, segments, lambda a: voice_quality.score_window(a)[1])
+    except speaker.ModelUnavailable as e:
+        log.warning("Voice similarity not measured: %s", e)
+        return speaker.not_measured("r.vs.no_model")
+    except Exception as e:  # a broken runtime must not sink the evaluation
+        log.warning("Voice similarity not measured: %s", e)
+        return speaker.not_measured("r.vs.error")
+
+
 def _media_id(path: str) -> str:
     """A cache key for a media file: its name and size (cached downloads are named after their source)."""
     return f"{Path(path).name}:{Path(path).stat().st_size}"
@@ -639,6 +652,9 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     vq = cached(f"v{CACHE_VERSION}|vq|{orig_id}|{dub_id}|{len(orig_speech)}|{len(dub_speech)}",
                 lambda: _voice_quality(y_orig, y_dub, orig_speech, dub_speech))
     step("Checking the dub's language part by part...", 0.67)
+    step("Comparing the dub voice with the original speakers...", 0.665)
+    vs = cached(f"v{CACHE_VERSION}|vs|{orig_id}|{dub_id}|{len(orig_stt['segments'])}",
+                lambda: _voice_similarity(y_orig, y_dub, orig_stt["segments"]))
     lang_windows = cached(f"v{CACHE_VERSION}|langwin|{whisper_model_name}|{stt_lang}|{dub_id}",
                           lambda: language_windows(y_dub, model(), orig_speech + dub_speech, stt_lang))
     integrity = video_integrity(original_video_path, dubbed_video_path)
@@ -710,6 +726,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
         },
         "video_integrity": integrity,
         "voice_quality": vq,
+        "voice_similarity": vs,
         "lipsync_metrics": {
             "measured": include_lipsync,
             "valid": dub_ls["valid"],

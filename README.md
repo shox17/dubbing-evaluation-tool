@@ -16,7 +16,7 @@ Works with any language pair, with or without lip-sync, on Windows, macOS and Li
 | Section | What it checks | How |
 |---|---|---|
 | **Timing & audio** | Same length? Same loudness? Unusual gaps? Distortion? Rushed speech? | `librosa` on both tracks: duration, RMS loudness (dB), silence, clipping, chars/words per second |
-| **Speech recognition** | Is the dub in the right language? Is the voice clear? Does it sound clean, not robotic or distorted? | Whisper language detection, the share of speech Whisper recognises confidently, and a voice-quality model (DNSMOS P.835) comparing the dub with the original at the same moments |
+| **Speech recognition** | Is the dub in the right language? Is the voice clear? Does it sound clean, not robotic or distorted? | Whisper language detection, the share of speech Whisper recognises confidently, a voice-quality model (DNSMOS P.835) comparing the dub with the original at the same moments, and a speaker-recognition model checking the dub voice still sounds like each original speaker (lines with a quiet background only) |
 | **Timing alignment** | Does the dub speak when the original speaks? | Whisper word timings of both tracks → overlap of speech (IoU) and the places where only one track speaks |
 | **Translation** *(automatic when a key is set)* | Same meaning? Anything missing or added? Names and numbers kept? | Gemini (or Claude) compares the two timestamped transcripts (needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) |
 | **Video integrity** | Is the picture unchanged, with an audio track? | Resolution, frame rate and audio stream of both files |
@@ -78,7 +78,7 @@ python qa.py "<your share link>"      # report in the terminal
 streamlit run app.py                  # or the app at http://localhost:8501
 ```
 
-The first run downloads the Whisper `base` speech model (~145 MB) to `~/.cache/whisper`, which takes about a minute. After that, a 30-second video takes about 45 seconds.
+The first run downloads the Whisper `base` speech model (~145 MB) to `~/.cache/whisper` and the speaker model (26 MB) to `~/.cache/dubbing-qa`, which takes about a minute. After that, a 30-second video takes about 45 seconds.
 
 ---
 
@@ -154,6 +154,7 @@ Full detail in [METRICS.md](docs/METRICS.md).
 | Speaking pace (Spanish) | ≤ 3.5 words/s | ≤ 4.2 | above |
 | Dub language | matches | unsure | different |
 | Voice clarity | ≥ 90% | ≥ 70% | below |
+| Voice similarity to the original speaker (lines with a quiet background) | ≥ 50% | below (never Poor) | |
 | Voice quality (vs the original, per ~9 s stretch) | voice < 0.6 and whole sound < 0.5 below | below that | voice ≥ 1.0 or whole sound ≥ 0.9 below |
 | Speech timing overlap | ≥ 75% | ≥ 55% | below |
 | Meaning (Gemini/Claude, 1–5) | ≥ 4 | 3 | below |
@@ -192,6 +193,7 @@ src/cli.py               The command-line entry point behind qa.py
 src/jobs.py              Background job runner and progress model (stages, %, stop)
 src/i18n.py              Interface text in English, Korean, Portuguese and Spanish
 src/voice_quality.py     Voice quality with the DNSMOS model (ONNX, CPU)
+src/speaker.py           Voice similarity with a speaker-recognition model (ONNX, downloaded once, 26 MB)
 src/models/              Bundled models (face landmarks, DNSMOS) and their licenses
 tests/                   pytest suite; tests/fake_perso.py fakes the share endpoint. tests/data/sample.mp4 (any ~30 s
                          English talking-head clip) is local test media, not in git; slow tests skip without it

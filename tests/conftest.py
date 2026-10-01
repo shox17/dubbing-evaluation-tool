@@ -38,6 +38,16 @@ def isolated_cache(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_model_downloads(monkeypatch):
+    """Tests never download models: the speaker model is used only if it's already on disk."""
+    from src import speaker
+
+    def refuse(url, out):
+        raise RuntimeError("tests never download models")
+    monkeypatch.setattr(speaker, "_download", refuse)
+
+
+@pytest.fixture(autouse=True)
 def no_real_api_keys(monkeypatch):
     """Tests never see real keys (the app loads .env): every provider key is removed from the environment."""
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):

@@ -428,6 +428,9 @@ MESSAGES = {
     "Rating the voice quality of both tracks...": {"ko": "두 트랙의 목소리 품질 평가 중...",
                                                    "pt": "Avaliando a qualidade da voz das duas faixas...",
                                                    "es": "Calificando la calidad de la voz de ambas pistas..."},
+    "Comparing the dub voice with the original speakers...": {"ko": "더빙 목소리를 원래 화자와 비교 중...",
+                                                              "pt": "Comparando a voz da dublagem com os falantes originais...",
+                                                              "es": "Comparando la voz del doblaje con los hablantes originales..."},
     "Comparing the two dubs...": {"ko": "두 더빙 비교 중...", "pt": "Comparando as duas dublagens...",
                                   "es": "Comparando los dos doblajes..."},
     "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {
