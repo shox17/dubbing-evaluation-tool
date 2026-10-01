@@ -1,4 +1,4 @@
-"""Background jobs: a share-link evaluation runs in a thread so the UI can show live progress, survive page
+"""Background jobs: a share-link evaluation (or a comparison of two) runs in a thread so the UI can show live progress, survive page
 reloads (the job id is kept in the URL) and let the user stop it."""
 import time
 import uuid
@@ -14,6 +14,9 @@ STAGES = [
     ("fetch", "Read the Perso share link"),
     ("download", "Download both videos"),
     ("evaluate", "Measure quality"),
+    ("dub_a", "Evaluate dub A"),
+    ("dub_b", "Evaluate dub B"),
+    ("compare", "Compare and recommend"),
 ]
 STAGE_KEYS = [k for k, _ in STAGES]
 
@@ -59,7 +62,7 @@ class Job:
     @property
     def overall_fraction(self) -> float:
         """Progress across all stages, weighted by their typical share of the run time."""
-        weights = {"fetch": 0.2, "download": 1, "evaluate": 6}
+        weights = {"fetch": 0.2, "download": 1, "evaluate": 6, "dub_a": 7, "dub_b": 7, "compare": 0.2}
         total = sum(weights[s] for s in self.stages)
         if self.status == "done":
             return 1.0

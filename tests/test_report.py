@@ -22,7 +22,7 @@ def test_good_dub_gets_good_verdict_and_every_row_explains_itself():
             if m["level"] in ("good", "check", "poor"):
                 assert m["thresholds"], f"{m['id']} must print the thresholds it used"
     assert metric(rep, "language")["display"] == "Korean (99% sure)"
-    assert rep["project"]["perso_seq"] == 420891 and rep["project"]["evaluated_video"] == "lip-synced video"
+    assert rep["project"]["perso_seq"] == 100001 and rep["project"]["evaluated_video"] == "lip-synced video"
 
 
 def test_one_poor_metric_makes_the_verdict_poor():
@@ -117,7 +117,7 @@ def test_renderers_show_verdict_sections_and_things_to_check():
     rep = build_report(r)
     text = render_text(rep)
     assert "OVERALL:  ✅  GOOD" in text and "3. TIMING ALIGNMENT" in text and "00:19.4–00:20.1" in text
-    assert "Perso #420891" in text and "NOT MEASURED" in text
+    assert "Perso #100001" in text and "NOT MEASURED" in text
     page = render_html(rep, r, "original.mp4", "dubbed_ko.mp4")
     assert page.startswith("<!doctype html>") and "prefers-color-scheme:dark" in page
     assert "<video" in page and "Speech timeline" in page and "Things to check" in page
@@ -192,3 +192,31 @@ def test_renderers_work_in_every_language(lang):
     rep = build_report(r, lang)
     assert rep["lang"] == lang and rep["labels"]["title"].upper() in render_text(rep)
     assert f"<html lang={lang}>" in render_html(rep, r)
+
+
+# ---------------- speaking pace per language ----------------
+def dub_in(code: str, name: str, rate: float, unit: str = "words/s", **kw) -> dict:
+    """Results for a dub into `code` speaking at `rate`."""
+    r = make_results(speech_recognition={"dubbed_speech_rate": {"value": rate, "unit": unit},
+                                         "dubbed_language_detected": code.split("-")[0]}, **kw)
+    r["pipeline"].update(target_language_code=code, target_language_name=name)
+    return r
+
+
+@pytest.mark.parametrize("code, rate, level", [
+    ("es", 3.5, "good"), ("es", 3.9, "check"), ("es", 4.2, "check"), ("es", 4.3, "poor"),
+    ("en", 3.2, "good"), ("en", 3.5, "check"), ("en", 3.8, "check"), ("en", 3.9, "poor"),
+    ("es-MX", 3.0, "good"), ("ko", 5.8, "good")])
+def test_pace_bands_for_spanish_english_and_korean(code, rate, level):
+    unit = "chars/s" if code == "ko" else "words/s"
+    row = metric(build_report(dub_in(code, code, rate, unit)), "speech_rate")
+    assert row["level"] == level and row["thresholds"]
+
+
+@pytest.mark.parametrize("code", ["fr", "pt", "xx"])
+def test_pace_is_not_measured_for_a_language_without_a_rule(code):
+    rep = build_report(dub_in(code, "French" if code == "fr" else code, 2.9))
+    row = metric(rep, "speech_rate")
+    assert row["level"] == "not_measured" and row["value"] is None
+    assert "no speaking-pace rule" in row["message"] and "2.9 words/s" in row["message"]
+    assert "speech_rate" in {x["id"] for x in rep["not_measured"]}

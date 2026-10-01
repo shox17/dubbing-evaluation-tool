@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import unicodedata
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -23,8 +24,8 @@ import imageio_ffmpeg
 
 log = logging.getLogger(__name__)
 
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-FACE_MODEL_PATH = os.path.join(SRC_DIR, "face_landmarker.task")
+SRC_DIR = Path(__file__).resolve().parent
+FACE_MODEL_PATH = str(SRC_DIR / "face_landmarker.task")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 SAMPLE_RATE = 16000
 
@@ -52,9 +53,14 @@ CLIP_LEVEL = 0.999                 # |sample| at or above this counts as clipped
 SPEECH_GRID_SEC = 0.05             # resolution of the speech-timing comparison
 SPEECH_MERGE_GAP_SEC = 0.3         # word gaps shorter than this are one stretch of speech
 MISMATCH_MIN_SEC = 0.5             # only-one-track-speaks stretches shorter than this are ignored
-MAX_MISMATCHES = 8                 # longest mismatches listed in the report
+MAX_MISMATCHES = 50                # longest mismatches kept (every one becomes a problem interval)
 WHISPER_LOGPROB_OK = -1.0          # Whisper's own thresholds for trusting a segment
 WHISPER_NO_SPEECH_OK = 0.6
+CLIP_MERGE_GAP_SEC = 0.5           # clipped samples closer than this form one distortion interval
+MAX_CLIP_INTERVALS = 50
+LANG_WINDOW_SEC = 10.0             # the dub's language is checked per window of this length...
+LANG_MAX_WINDOWS = 60              # ...widened for long videos so at most this many windows are checked
+LANG_MIN_SPEECH_SEC = 3.0          # windows with less speech than this are skipped
 
 _whisper_models: dict = {}
 _whisper_lock = threading.Lock()
@@ -71,7 +77,7 @@ def get_whisper_model(model_name: str = DEFAULT_WHISPER_MODEL):
 
 def extract_audio(video_path: str, output_audio_path: str, sample_rate: int = SAMPLE_RATE) -> str:
     """Extracts 16kHz mono PCM WAV audio using the bundled ffmpeg binary."""
-    os.makedirs(os.path.dirname(os.path.abspath(output_audio_path)), exist_ok=True)
+    Path(output_audio_path).resolve().parent.mkdir(parents=True, exist_ok=True)
     command = [
         FFMPEG_EXE, "-nostdin", "-y",
         "-i", video_path,
@@ -141,7 +147,7 @@ def score_transcript(ground_truth: str, hypothesis: str, lang: str) -> dict:
     wer = float(jiwer.wer(ref, hyp)) if hyp else 1.0
     # CER ignores word boundaries, so spacing differences don't count as errors.
     cer = float(jiwer.cer(ref.replace(" ", ""), hyp.replace(" ", ""))) if hyp else 1.0
-    primary = "cer" if lang in CER_LANGS else "wer"
+    primary = "cer" if base_lang(lang) in CER_LANGS else "wer"
     error_rate = cer if primary == "cer" else wer
     return {
         "wer": round(wer, 3),
@@ -152,8 +158,14 @@ def score_transcript(ground_truth: str, hypothesis: str, lang: str) -> dict:
     }
 
 
-def whisper_language(code: str) -> Optional[str]:
+def base_lang(code: Optional[str]) -> str:
+    """The base language of a code: "es-MX" -> "es", "zh_CN" -> "zh", None -> ""."""
+    return (code or "").replace("_", "-").split("-")[0].strip().lower()
+
+
+def whisper_language(code: Optional[str]) -> Optional[str]:
     """Whisper's code for a Perso language code, or None when Whisper has no model for it."""
+    code = base_lang(code)
     code = WHISPER_CODE_ALIASES.get(code, code)
     return code if code in whisper.tokenizer.LANGUAGES else None
 
@@ -178,15 +190,67 @@ def transcribe(y: np.ndarray, whisper_model, language: Optional[str] = None) -> 
             "segments": segments}
 
 
+def _language_probs(y: np.ndarray, whisper_model) -> dict:
+    """Whisper's probability for every language, from the first 30 s of y."""
+    audio = whisper.pad_or_trim(y.astype(np.float32))
+    mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model.dims.n_mels).to(whisper_model.device)
+    _, probs = whisper_model.detect_language(mel)
+    return probs
+
+
 def detect_language(y: np.ndarray, whisper_model) -> tuple[Optional[str], Optional[float]]:
     """Whisper's guess of the spoken language in the first 30 s, with its probability."""
     if not len(y):
         return None, None
-    audio = whisper.pad_or_trim(y.astype(np.float32))
-    mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model.dims.n_mels).to(whisper_model.device)
-    _, probs = whisper_model.detect_language(mel)
+    probs = _language_probs(y, whisper_model)
     code = max(probs, key=probs.get)
     return code, round(float(probs[code]), 3)
+
+
+def language_windows(y: np.ndarray, whisper_model, speech: list[list[float]], expected: Optional[str],
+                     sr: int = SAMPLE_RATE) -> list[dict]:
+    """The dub's language window by window, so a part left in the original language (or another one) is found.
+
+    Each window with enough speech gets Whisper's top language, its probability and the expected language's
+    probability. Windows widen on long videos so at most LANG_MAX_WINDOWS are checked. speech should include the
+    original's speech times: a dub in the wrong language transcribes badly, so its own speech times are unreliable.
+    """
+    duration = len(y) / sr if sr else 0.0
+    if not expected or duration <= 0:
+        return []
+    merged: list[list[float]] = []
+    for s, e in sorted([s, e] for s, e in speech if e > s):
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    speech = merged
+    width = max(LANG_WINDOW_SEC, duration / LANG_MAX_WINDOWS)
+    windows, start = [], 0.0
+    while start < duration:
+        end = min(duration, start + width)
+        spoken = sum(max(0.0, min(e, end) - max(s, start)) for s, e in speech)
+        if spoken >= min(LANG_MIN_SPEECH_SEC, (end - start) * 0.5):
+            probs = _language_probs(y[int(start * sr):int(end * sr)], whisper_model)
+            top = max(probs, key=probs.get)
+            windows.append({"start": round(start, 2), "end": round(end, 2), "language": top,
+                            "probability": round(float(probs[top]), 3),
+                            "expected_probability": round(float(probs.get(expected, 0.0)), 3)})
+        start = end
+    return windows
+
+
+def clipping_intervals(y: np.ndarray, sr: int = SAMPLE_RATE) -> list[list[float]]:
+    """Where the dub's audio hits full scale: [start, end] stretches, merging clips closer than 0.5 s."""
+    idx = np.flatnonzero(np.abs(y) >= CLIP_LEVEL) if len(y) else np.array([], dtype=int)
+    if not len(idx):
+        return []
+    gap = int(CLIP_MERGE_GAP_SEC * sr)
+    breaks = np.flatnonzero(np.diff(idx) > gap)
+    starts, ends = np.concatenate([[idx[0]], idx[breaks + 1]]), np.concatenate([idx[breaks], [idx[-1]]])
+    spans = [[round(a / sr, 2), round((b + 1) / sr, 2)] for a, b in zip(starts, ends)]
+    longest = sorted(spans, key=lambda s: s[0] - s[1])[:MAX_CLIP_INTERVALS]
+    return sorted(longest)
 
 
 def _is_real_speech(seg: dict) -> bool:
@@ -266,11 +330,33 @@ def timing_alignment(original: list[list[float]], dubbed: list[list[float]], dur
     }
 
 
+def _cv2_path(path: str) -> str:
+    """A path OpenCV can open. On Windows OpenCV can't open non-ASCII paths (e.g. a Korean user name), so it
+    gets a relative or 8.3 short path instead when that is plain ASCII."""
+    if os.name != "nt" or path.isascii():
+        return path
+    try:
+        rel = os.path.relpath(path)
+        if rel.isascii():
+            return rel
+    except ValueError:                        # on another drive
+        pass
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf)) and buf.value.isascii():
+            return buf.value
+    except (AttributeError, OSError):
+        pass
+    log.warning("OpenCV may not open this non-ASCII path on Windows: %s", path)
+    return path
+
+
 def probe_media(video_path: str) -> dict:
     """Resolution, frame rate, frame count, duration and whether an audio track exists (reads the file only)."""
     info = {"readable": False, "width": None, "height": None, "fps": None, "frames": None,
             "duration_sec": None, "has_audio": False}
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(_cv2_path(video_path))
     try:
         if cap.isOpened():
             fps = cap.get(cv2.CAP_PROP_FPS) or 0
@@ -334,7 +420,7 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
         "timestamps": [], "mar_waveform": [], "rms_waveform": []
     }
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(_cv2_path(video_path))
     if not cap.isOpened():
         return {**invalid, "reason": "video could not be opened", "reason_key": "r.lips.no_video"}
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -344,7 +430,8 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
     max_frame = int(max_seconds * fps)
 
     options = vision.FaceLandmarkerOptions(
-        base_options=mp_python.BaseOptions(model_asset_path=model_path),
+        # The model is passed as bytes: MediaPipe can't open non-ASCII paths on Windows.
+        base_options=mp_python.BaseOptions(model_asset_buffer=Path(model_path).read_bytes()),
         running_mode=vision.RunningMode.VIDEO,
         num_faces=1
     )
@@ -464,46 +551,67 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
     norm = normalize_text(text)
     if not norm or speaking_sec <= 0:
         return None
-    if lang in CER_LANGS:
+    if base_lang(lang) in CER_LANGS:
         count, unit = len(norm.replace(" ", "")), "chars/s"
     else:
         count, unit = len(norm.split()), "words/s"
     return {"value": round(count / speaking_sec, 2), "unit": unit}
 
 
+def _media_id(path: str) -> str:
+    """A cache key for a media file: its name and size (cached downloads are named after their source)."""
+    return f"{Path(path).name}:{Path(path).stat().st_size}"
+
+
 def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground_truth_text: str,
                         target_lang: str = "ko", whisper_model_name: str = DEFAULT_WHISPER_MODEL,
                         on_step: Optional[Callable[[str, float], None]] = None,
-                        include_lipsync: bool = True, source_lang: Optional[str] = None) -> dict:
+                        include_lipsync: bool = True, source_lang: Optional[str] = None,
+                        cache=None) -> dict:
     """Runs the acoustic, speech-recognition, timing, file and lip-sync evaluation. Returns results; writes no files.
 
     include_lipsync: the experimental lip-movement analysis is the slowest step; False skips it.
     source_lang: the original's language when known (share links say it); None lets Whisper detect it.
+    cache: an optional dict-like store (get / item assignment) for Whisper results, keyed by model, language and
+    media file, so a rerun on the same videos skips speech recognition. The caller owns any file it writes to.
     """
+    cache = cache if cache is not None else {}
+
+    def cached(key: str, compute: Callable[[], object]):
+        """The cached value for key, computing and storing it on a miss."""
+        value = cache.get(key)
+        if value is None:
+            value = compute()
+            cache[key] = value
+        return value
     def step(msg: str, frac: float):
         """Reports evaluation progress, if a callback was given."""
         if on_step:
             on_step(msg, frac)
 
     step("Loading the speech recognition model...", 0.02)
-    model = get_whisper_model(whisper_model_name)
+    model = lambda: get_whisper_model(whisper_model_name)      # loaded only when a result isn't cached
 
     step("Extracting audio from both videos...", 0.10)
     with tempfile.TemporaryDirectory(prefix="dubeval_") as tmp:
-        y_orig = load_audio(extract_audio(original_video_path, os.path.join(tmp, "orig.wav")))
-        y_dub = load_audio(extract_audio(dubbed_video_path, os.path.join(tmp, "dubbed.wav")))
+        y_orig = load_audio(extract_audio(original_video_path, str(Path(tmp) / "orig.wav")))
+        y_dub = load_audio(extract_audio(dubbed_video_path, str(Path(tmp) / "dubbed.wav")))
 
     step("Measuring loudness and silence...", 0.15)
     orig_ac = analyze_acoustics(y_orig)
     dub_ac = analyze_acoustics(y_dub)
 
-    step("Transcribing the original speech...", 0.20)
-    orig_stt = transcribe(y_orig, model, language=whisper_language(source_lang) if source_lang else None)
-    step("Checking which language the dub is in...", 0.40)
-    dub_detected, dub_detected_prob = detect_language(y_dub, model)
-    step("Transcribing the dubbed speech...", 0.45)
+    orig_id, dub_id = _media_id(original_video_path), _media_id(dubbed_video_path)
+    src_lang = whisper_language(source_lang) if source_lang else None
     stt_lang = whisper_language(target_lang)
-    dub_stt = transcribe(y_dub, model, language=stt_lang)
+    step("Transcribing the original speech...", 0.20)
+    orig_stt = cached(f"stt|{whisper_model_name}|{src_lang or 'auto'}|{orig_id}",
+                      lambda: transcribe(y_orig, model(), language=src_lang))
+    step("Checking which language the dub is in...", 0.40)
+    dub_detected, dub_detected_prob = cached(f"lang|{whisper_model_name}|{dub_id}", lambda: detect_language(y_dub, model()))
+    step("Transcribing the dubbed speech...", 0.45)
+    dub_stt = cached(f"stt|{whisper_model_name}|{stt_lang or 'auto'}|{dub_id}",
+                     lambda: transcribe(y_dub, model(), language=stt_lang))
     scores = score_transcript(ground_truth_text, dub_stt["text"], target_lang)
 
     step("Comparing when each track speaks...", 0.65)
@@ -511,6 +619,9 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     dub_speech = speech_intervals(dub_stt["segments"])
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
+    step("Checking the dub's language part by part...", 0.67)
+    lang_windows = cached(f"langwin2|{whisper_model_name}|{stt_lang}|{dub_id}",
+                          lambda: language_windows(y_dub, model(), orig_speech + dub_speech, stt_lang))
     integrity = video_integrity(original_video_path, dubbed_video_path)
 
     if include_lipsync:
@@ -552,6 +663,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "original_peak_dbfs": orig_ac["peak_dbfs"],
             "dubbed_peak_dbfs": dub_ac["peak_dbfs"],
             "dubbed_clipping_pct": dub_ac["clipping_pct"],
+            "dubbed_clipping_intervals": clipping_intervals(y_dub),
             "loudness_envelope": {
                 "step_sec": 0.25,
                 "original_db": loudness_envelope(y_orig),
@@ -567,6 +679,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "dubbed_speech_rate": speech_rate(dub_stt["text"], dub_speaking, target_lang),
             "dubbed_language_detected": dub_detected,
             "dubbed_language_probability": dub_detected_prob,
+            "dubbed_language_windows": lang_windows,
             "clarity": clarity,
             "original_segments": [{k: s[k] for k in ("start", "end", "text")} for s in orig_stt["segments"]],
             "dubbed_segments": [{k: s[k] for k in ("start", "end", "text")} for s in dub_stt["segments"]]

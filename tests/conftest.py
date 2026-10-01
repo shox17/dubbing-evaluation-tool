@@ -30,6 +30,14 @@ def isolated_output(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache(tmp_path, monkeypatch):
+    """Downloads and Whisper results are cached per share link; each test gets its own empty cache."""
+    from src import pipeline
+    monkeypatch.setattr(pipeline, "CACHE_DIR", tmp_path / "cache")
+    return tmp_path / "cache"
+
+
+@pytest.fixture(autouse=True)
 def no_real_api_keys(monkeypatch):
     """Tests never see real keys (the app loads .env): every provider key is removed from the environment."""
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):

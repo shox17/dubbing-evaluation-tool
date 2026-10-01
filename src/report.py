@@ -5,21 +5,23 @@ plain-language explanation and how it is graded, lists timestamped things to che
 verdict, all in the chosen interface language (texts live in src/report_text.py). render_text and render_html
 present the same report. Pure: no file writes, no network.
 """
-import os
 import html
 import math
 import textwrap
+from pathlib import Path
 from typing import Callable, Optional
 
-from src.evaluate import CER_LANGS, whisper_language
+from src.evaluate import base_lang, whisper_language
 from src.i18n import DEFAULT_UI_LANGUAGE, t as i18n_t
+from src.intervals import build_intervals, local_text as _local
 
 # Thresholds, in one place so the report can print exactly what it applied.
 LENGTH_PCT = (5.0, 15.0)                 # |dub - original| / original
 LOUDNESS_DB = (2.0, 4.0)                 # |20 log10(rms ratio)|
 SILENCE_PTS = (5.0, 15.0)                # extra silence in the dub, percentage points
 CLIPPING_PCT = (0.01, 0.1)               # share of samples at full scale
-SPEECH_RATE = {"ko": (7.5, 9.0), "ja": (8.5, 10.5), "zh": (6.0, 7.5), "words": (3.5, 4.5)}
+# Speaking pace per dub language: chars/s for ko/ja/zh, words/s for en/es. A language without a rule is not graded.
+SPEECH_RATE = {"ko": (7.5, 9.0), "ja": (8.5, 10.5), "zh": (6.0, 7.5), "en": (3.2, 3.8), "es": (3.5, 4.2)}
 CLARITY_PCT = (90.0, 70.0)               # speech time Whisper recognised confidently
 LANGUAGE_PROB = 0.5                      # below this the language guess is uncertain
 OVERLAP_PCT = (75.0, 55.0)               # speech-timing overlap; a real Perso EN→KO dub scores ~81%
@@ -65,15 +67,8 @@ def _na(tr: Tr, mid: str, reason: str) -> dict:
     return _metric(tr, mid, "not_measured", reason)
 
 
-def _local(value, lang: str) -> str:
-    """Text in lang from a {lang: text} dict (the judge's output), falling back to English; plain strings pass."""
-    if isinstance(value, dict):
-        return value.get(lang) or value.get("en") or ""
-    return str(value or "")
-
-
 # ---------------- sections ----------------
-def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str) -> list[dict]:
+def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str, lang_name: str) -> list[dict]:
     """Length, loudness, silence, distortion and speaking pace."""
     rows = []
     od, dd = ac["original_duration_sec"], ac["dubbed_duration_sec"]
@@ -120,21 +115,22 @@ def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str) -> list[dict]:
         rows.append(_metric(tr, "clipping", level, msg, clip, f"{clip:.3f}%",
                             tr("r.g.clipping", good=f"{CLIPPING_PCT[0]:g}", check=f"{CLIPPING_PCT[1]:g}")))
 
-    rate = sr.get("dubbed_speech_rate")
-    key = lang if lang in CER_LANGS else "words"
-    if rate:
-        unit = tr(f"unit.{rate['unit']}")
-        shown = f"{rate['value']:.1f} {unit}"
-        if key in SPEECH_RATE:
-            bands = SPEECH_RATE[key]
-            level = _band_max(rate["value"], bands)
-            rows.append(_metric(tr, "speech_rate", level, tr(f"r.pace.{level}", rate=shown), rate["value"], shown,
-                                tr("r.g.pace", good=f"{bands[0]:g}", check=f"{bands[1]:g}", unit=unit)))
-        else:
-            rows.append(_metric(tr, "speech_rate", "info", tr("r.pace.info", rate=shown), rate["value"], shown))
-    else:
-        rows.append(_na(tr, "speech_rate", tr("r.no_speech")))
+    rows.append(_pace(tr, sr.get("dubbed_speech_rate"), lang, lang_name))
     return rows
+
+
+def _pace(tr: Tr, rate: Optional[dict], lang: str, lang_name: str) -> dict:
+    """Speaking pace of the dub, graded only for languages with a pace rule (SPEECH_RATE)."""
+    if not rate:
+        return _na(tr, "speech_rate", tr("r.no_speech"))
+    unit = tr(f"unit.{rate['unit']}")
+    shown = f"{rate['value']:.1f} {unit}"
+    bands = SPEECH_RATE.get(base_lang(lang))
+    if not bands:
+        return _na(tr, "speech_rate", tr("r.pace.no_rule", lang=lang_name or lang or "?", rate=shown))
+    level = _band_max(rate["value"], bands)
+    return _metric(tr, "speech_rate", level, tr(f"r.pace.{level}", rate=shown), rate["value"], shown,
+                   tr("r.g.pace", good=f"{bands[0]:g}", check=f"{bands[1]:g}", unit=unit))
 
 
 def _speech(tr: Tr, sr: dict, lang: str, lang_name: str) -> list[dict]:
@@ -266,23 +262,11 @@ def _lipsync(tr: Tr, ls: dict, is_lipsync: Optional[bool]) -> list[dict]:
 
 
 # ---------------- things to check ----------------
-def _things_to_check(tr: Tr, r: dict, tj: Optional[dict], lang: str) -> list[dict]:
-    """Timestamped places a person should look at, in time order."""
-    items = []
-    for m in r.get("timing_alignment", {}).get("mismatches", []):
-        items.append({"start": m["start"], "end": m["end"], "category": tr("r.cat.timing"), "severity": "check",
-                      "message": tr(f"r.todo.{m['kind']}")})
-    for s in (r.get("speech_recognition", {}).get("clarity") or {}).get("unclear_segments", []):
-        items.append({"start": s["start"], "end": s["end"], "category": tr("r.cat.clarity"), "severity": "check",
-                      "message": tr("r.todo.unclear", text=s["text"])})
-    for i in (tj or {}).get("issues", []) if (tj or {}).get("measured") else []:
-        quote = " → ".join(q for q in (f"“{i['original']}”" if i["original"] else "",
-                                       f"“{i['dubbed']}”" if i["dubbed"] else "") if q)
-        maybe = bool(i.get("may_be_recognition_error"))
-        items.append({"start": i["start_sec"], "end": None, "category": tr(f"r.cat.{i['type']}"),
-                      "severity": "poor" if i["severity"] == "major" and not maybe else "check",
-                      "message": _local(i["explanation"], lang) + (" " + tr("r.todo.maybe_asr") if maybe else "")
-                      + (f" {quote}" if quote else "")})
+def _things_to_check(tr: Tr, r: dict, found: dict) -> list[dict]:
+    """Timestamped places a person should look at, in time order: problem intervals, probable recognition
+    errors (listed, never counted) and general warnings without a time."""
+    items = [{"start": i["start"], "end": i["end"], "category": i["category_label"], "severity": i["severity"],
+              "message": i["description"]} for i in found["intervals"] + found["possible_asr_errors"]]
     for w in r.get("warnings", []):
         text = tr(w["key"], **w.get("params", {})) if isinstance(w, dict) else str(w)
         items.append({"start": None, "end": None, "category": tr("r.cat.general"), "severity": "check", "message": text})
@@ -295,7 +279,7 @@ def _project(r: dict) -> dict:
     p, meta = r.get("pipeline", {}), r.get("metadata", {})
     share = p.get("share") or {}
     return {
-        "title": share.get("title") or os.path.basename(p.get("input_video_path", "")),
+        "title": share.get("title") or Path(p.get("input_video_path") or "").name,
         "perso_seq": share.get("seq"),
         "share_url": share.get("share_url"),
         "source_language": share.get("source_language_name") or meta.get("detected_source_language"),
@@ -319,18 +303,20 @@ def _headline(tr: Tr, level: str, counts: dict) -> str:
         " " + _pl(tr, "r.headline.plus_check", counts["check"]) if counts["check"] else "")
 
 
-def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
-    """The full report for a results dict, in lang: overall verdict, sections of measures, things to check."""
+def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE, dub: Optional[str] = None) -> dict:
+    """The full report for a results dict, in lang: overall verdict, sections of measures, problem intervals and
+    things to check. dub labels the intervals ("A" / "B") when two dubs are compared."""
     tr: Tr = lambda key, **p: i18n_t(key, lang, **p)
     ac, sr = r["acoustic_metrics"], r["speech_recognition"]
     project = _project(r)
-    code = project["target_language_code"] or "ko"
+    code = project["target_language_code"] or ""
+    lang_name = project["target_language"] or code
     tj = r.get("translation_judge")
     if project["evaluated_video"]:
         project["evaluated_video"] = tr("r.evaluated." + ("lipsync" if project["is_lipsync"] else "dub"))
     sections = [
-        {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code)},
-        {"id": "speech", "metrics": _speech(tr, sr, code, project["target_language"] or code)},
+        {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code, lang_name)},
+        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name)},
         {"id": "alignment", "metrics": _alignment(tr, r.get("timing_alignment") or {})},
         {"id": "translation", "metrics": _translation(tr, tj, lang), "note": tr("r.note.translation")},
         {"id": "integrity", "metrics": _integrity(tr, r.get("video_integrity"))},
@@ -342,6 +328,8 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
     metrics = [m for s in sections for m in s["metrics"]]
     counts = {lv: sum(1 for m in metrics if m["level"] == lv) for lv in (*LEVELS, "not_measured")}
     level = "poor" if counts["poor"] else "check" if counts["check"] else "good"
+    clipping_poor = any(m["id"] == "clipping" and m["level"] == "poor" for m in metrics)
+    found = build_intervals(r, tr, lang, clipping_poor=clipping_poor, dub=dub)
     return {
         "report_version": 2,
         "lang": lang,
@@ -349,7 +337,10 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
         "overall": {"level": level, "label": tr(f"verdict.{level}"), "headline": _headline(tr, level, counts),
                     "counts": counts},
         "sections": sections,
-        "things_to_check": _things_to_check(tr, r, tj, lang),
+        "problem_intervals": found["intervals"],
+        "possible_asr_errors": found["possible_asr_errors"],
+        "problem_seconds": found["problem_seconds"],
+        "things_to_check": _things_to_check(tr, r, found),
         "not_measured": [{"id": m["id"], "label": m["label"], "reason": m["message"]} for m in metrics
                          if m["level"] == "not_measured"],
         "method": {

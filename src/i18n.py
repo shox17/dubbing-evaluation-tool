@@ -58,6 +58,10 @@ TEXT = {
     "stage.download": {"en": "Download both videos", "ko": "두 영상 다운로드", "pt": "Baixar os dois vídeos",
                        "es": "Descargar ambos videos"},
     "stage.evaluate": {"en": "Measure quality", "ko": "품질 측정", "pt": "Medir a qualidade", "es": "Medir la calidad"},
+    "stage.dub_a": {"en": "Evaluate dub A", "ko": "더빙 A 평가", "pt": "Avaliar a dublagem A", "es": "Evaluar el doblaje A"},
+    "stage.dub_b": {"en": "Evaluate dub B", "ko": "더빙 B 평가", "pt": "Avaliar a dublagem B", "es": "Evaluar el doblaje B"},
+    "stage.compare": {"en": "Compare and recommend", "ko": "비교 및 추천", "pt": "Comparar e recomendar",
+                      "es": "Comparar y recomendar"},
 
     # ----- time -----
     "time.min_sec": {"en": "{m} min {s} s", "ko": "{m}분 {s}초", "pt": "{m} min {s} s", "es": "{m} min {s} s"},
@@ -66,6 +70,8 @@ TEXT = {
     # ----- progress page -----
     "progress.title": {"en": "Evaluating the dub", "ko": "더빙 평가 중", "pt": "Avaliando a dublagem",
                        "es": "Evaluando el doblaje"},
+    "progress.title_compare": {"en": "Evaluating both dubs", "ko": "두 더빙 평가 중", "pt": "Avaliando as duas dublagens",
+                               "es": "Evaluando los dos doblajes"},
     "progress.overall": {"en": "Overall", "ko": "전체", "pt": "Total", "es": "Total"},
     "progress.elapsed": {"en": "Elapsed", "ko": "경과 시간", "pt": "Tempo decorrido", "es": "Tiempo transcurrido"},
     "progress.stop": {"en": "Stop waiting", "ko": "기다리기 중지", "pt": "Parar de esperar", "es": "Dejar de esperar"},
@@ -309,6 +315,43 @@ TEXT = {
     },
     "share.start": {"en": "Evaluate this dub", "ko": "이 더빙 평가하기", "pt": "Avaliar esta dublagem",
                     "es": "Evaluar este doblaje"},
+    "mode.single": {"en": "Check one dub", "ko": "더빙 하나 확인", "pt": "Verificar uma dublagem", "es": "Revisar un doblaje"},
+    "mode.compare": {"en": "Compare two dubs", "ko": "더빙 두 개 비교", "pt": "Comparar duas dublagens",
+                     "es": "Comparar dos doblajes"},
+    "compare.title": {"en": "① Paste two Perso share links", "ko": "① Perso 공유 링크 두 개 붙여넣기",
+                      "pt": "① Cole dois links de compartilhamento da Perso", "es": "① Pega dos enlaces compartidos de Perso"},
+    "compare.caption": {
+        "en": "Two dubs of the same video (for example two versions, or with and without lip-sync). Both are measured "
+              "the same way, and the tool recommends which one to deliver and explains why.",
+        "ko": "같은 영상의 더빙 두 개를 넣으세요(예: 두 가지 버전, 립싱크 있음/없음). 두 더빙을 같은 방식으로 측정하고 "
+              "어느 쪽을 납품할지 추천하며 이유를 설명합니다.",
+        "pt": "Duas dublagens do mesmo vídeo (por exemplo, duas versões, ou com e sem sincronização labial). As duas são "
+              "medidas do mesmo jeito, e a ferramenta recomenda qual entregar e explica por quê.",
+        "es": "Dos doblajes del mismo video (por ejemplo, dos versiones, o con y sin sincronización labial). Los dos se "
+              "miden igual, y la herramienta recomienda cuál entregar y explica por qué.",
+    },
+    "compare.start": {"en": "Evaluate and compare", "ko": "평가하고 비교하기", "pt": "Avaliar e comparar",
+                      "es": "Evaluar y comparar"},
+    "compare.same_link": {
+        "en": "Both links point to the same Perso project, so the comparison will show the same dub twice.",
+        "ko": "두 링크가 같은 Perso 프로젝트를 가리켜 같은 더빙을 두 번 비교하게 됩니다.",
+        "pt": "Os dois links apontam para o mesmo projeto Perso, então a comparação mostrará a mesma dublagem duas vezes.",
+        "es": "Los dos enlaces apuntan al mismo proyecto de Perso, así que la comparación mostrará el mismo doblaje dos "
+              "veces.",
+    },
+    "problem.compare": {"en": "Paste two valid Perso share links first.", "ko": "먼저 올바른 Perso 공유 링크 두 개를 붙여 넣으세요.",
+                        "pt": "Cole primeiro dois links de compartilhamento válidos da Perso.",
+                        "es": "Pega primero dos enlaces compartidos válidos de Perso."},
+    "compare.download_html": {"en": "Download comparison", "ko": "비교 보고서 다운로드", "pt": "Baixar comparação",
+                              "es": "Descargar comparación"},
+    "compare.download_html_help": {
+        "en": "One HTML file with the recommendation, problem intervals, reasoning and every check side by side.",
+        "ko": "추천, 문제 구간, 판단 근거, 전체 항목 비교가 담긴 HTML 파일 하나입니다.",
+        "pt": "Um arquivo HTML com a recomendação, os trechos com problemas, a justificativa e todas as verificações.",
+        "es": "Un archivo HTML con la recomendación, los tramos con problemas, el razonamiento y todas las comprobaciones.",
+    },
+    "compare.download_json": {"en": "Download data (JSON)", "ko": "데이터 다운로드(JSON)", "pt": "Baixar dados (JSON)",
+                              "es": "Descargar datos (JSON)"},
     "problem.share": {"en": "Paste a Perso share link first.", "ko": "먼저 Perso 공유 링크를 붙여 넣으세요.",
                       "pt": "Primeiro, cole um link de compartilhamento da Perso.",
                       "es": "Primero, pega un enlace compartido de Perso."},
@@ -339,7 +382,7 @@ TEXT.update(REPORT_TEXT)
 MESSAGES = {
     # User-facing errors from src/ (share links, downloads, stopped jobs).
     'Paste a Perso share link, for example https://perso.ai/en/share/video-translator?seq=…': {"ko": 'Perso 공유 링크를 붙여 넣으세요. 예: https://perso.ai/en/share/video-translator?seq=…', "pt": 'Cole um link de compartilhamento da Perso, por exemplo https://perso.ai/en/share/video-translator?seq=…', "es": 'Pega un enlace compartido de Perso, por ejemplo https://perso.ai/en/share/video-translator?seq=…'},
-    "This doesn't look like a Perso share link. Open the dubbed video in Perso, choose Share, and copy the link (it contains /share/ and ?seq=).": {"ko": 'Perso 공유 링크가 아닌 것 같습니다. Perso에서 더빙 영상을 열고 공유를 눌러 링크를 복사하세요(/share/와 ?seq=가 포함됨).', "pt": 'Isso não parece um link de compartilhamento da Perso. Abra o vídeo dublado na Perso, escolha Compartilhar e copie o link (ele contém /share/ e ?seq=).', "es": 'Esto no parece un enlace compartido de Perso. Abre el video doblado en Perso, elige Compartir y copia el enlace (contiene /share/ y ?seq=).'},
+    "This doesn't look like a Perso share link. Open the dubbed video in Perso, choose Share, and copy the link (it contains ?seq=).": {"ko": 'Perso 공유 링크가 아닌 것 같습니다. Perso에서 더빙 영상을 열고 공유를 눌러 링크를 복사하세요(?seq=가 포함됨).', "pt": 'Isso não parece um link de compartilhamento da Perso. Abra o vídeo dublado na Perso, escolha Compartilhar e copie o link (ele contém ?seq=).', "es": 'Esto no parece un enlace compartido de Perso. Abre el video doblado en Perso, elige Compartir y copia el enlace (contiene ?seq=).'},
     'The share link is missing its seq=… part. Copy the whole link from Perso again.': {"ko": '공유 링크에 seq=… 부분이 없습니다. Perso에서 링크 전체를 다시 복사하세요.', "pt": 'O link está sem a parte seq=…. Copie o link inteiro da Perso novamente.', "es": 'Al enlace le falta la parte seq=…. Vuelve a copiar el enlace completo desde Perso.'},
     'Sharing is turned off for this Perso project. Ask the owner to turn sharing on, then try again.': {"ko": '이 Perso 프로젝트는 공유가 꺼져 있습니다. 소유자에게 공유를 켜 달라고 요청한 뒤 다시 시도하세요.', "pt": 'O compartilhamento está desligado neste projeto da Perso. Peça ao proprietário para ativá-lo e tente de novo.', "es": 'El uso compartido está desactivado en este proyecto de Perso. Pide al propietario que lo active y vuelve a intentarlo.'},
     "Perso couldn't find a project for this share link. Check that the link is complete and that sharing is still turned on.": {"ko": 'Perso에서 이 공유 링크의 프로젝트를 찾지 못했습니다. 링크가 완전한지, 공유가 켜져 있는지 확인하세요.', "pt": 'A Perso não encontrou um projeto para este link. Confira se o link está completo e se o compartilhamento continua ativo.', "es": 'Perso no encontró un proyecto para este enlace. Comprueba que el enlace está completo y que el uso compartido sigue activo.'},
@@ -380,6 +423,17 @@ MESSAGES = {
                                           "es": "Descargando el video original..."},
     "Checking which language the dub is in...": {"ko": "더빙 언어 확인 중...", "pt": "Verificando o idioma da dublagem...",
                                                  "es": "Comprobando el idioma del doblaje..."},
+    "Comparing the two dubs...": {"ko": "두 더빙 비교 중...", "pt": "Comparando as duas dublagens...",
+                                  "es": "Comparando los dos doblajes..."},
+    "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {
+        "ko": "이 공유 링크에는 원본 영상이 없습니다. 명령줄에서 --original <파일 또는 URL>로 원본을 지정한 뒤 다시 시도하세요.",
+        "pt": "Este link não tem o vídeo original. Informe o original com --original <arquivo ou URL> (linha de comando) "
+              "e tente de novo.",
+        "es": "Este enlace no tiene el video original. Indica el original con --original <archivo o URL> (línea de "
+              "comandos) y vuelve a intentarlo."},
+    "Checking the dub's language part by part...": {"ko": "더빙 언어를 구간별로 확인 중...",
+                                                    "pt": "Verificando o idioma da dublagem por trechos...",
+                                                    "es": "Comprobando el idioma del doblaje por partes..."},
     "Comparing when each track speaks...": {"ko": "각 트랙이 말하는 구간 비교 중...",
                                             "pt": "Comparando quando cada faixa fala...",
                                             "es": "Comparando cuándo habla cada pista..."},

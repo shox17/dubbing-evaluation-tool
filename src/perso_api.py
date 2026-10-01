@@ -6,6 +6,7 @@ no credits. Flow: parse_share_url -> get_shared_project -> download_media for th
 import os
 import re
 import time
+from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 
@@ -20,6 +21,8 @@ ERROR_HINTS = {
 }
 
 SHARE_HOSTS = ("perso.ai", "www.perso.ai")
+NOT_A_SHARE_LINK = ("This doesn't look like a Perso share link. Open the dubbed video in Perso, choose Share, and copy "
+                    "the link (it contains ?seq=).")
 SHARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-.~]{16,}$")
 
 
@@ -57,17 +60,21 @@ def _error_from_response(resp: requests.Response) -> PersoError:
 
 
 def parse_share_url(url: str) -> str:
-    """The share token from a Perso share link (or a bare token). Raises ValueError for anything else."""
+    """The share token from a Perso share link (or a bare token). Raises ValueError for anything else.
+
+    Perso shares a dub under several URL shapes, all carrying the same public token in seq=:
+    /<lang>/share/video-translator?seq=… (Share dialog) and /video-translator/<src>-<tgt>/<category>?seq=…
+    (gallery pages). Any perso.ai link with a valid seq token is accepted.
+    """
     text = (url or "").strip()
     if not text:
         raise ValueError("Paste a Perso share link, for example https://perso.ai/en/share/video-translator?seq=…")
     if SHARE_TOKEN_RE.match(text):
         return text
     parts = urlsplit(text if "://" in text else "https://" + text)
-    if parts.hostname not in SHARE_HOSTS or "/share" not in parts.path:
-        raise ValueError("This doesn't look like a Perso share link. Open the dubbed video in Perso, "
-                         "choose Share, and copy the link (it contains /share/ and ?seq=).")
     token = (parse_qs(parts.query).get("seq") or [""])[0].strip()
+    if parts.hostname not in SHARE_HOSTS or not (token or "/share" in parts.path):
+        raise ValueError(NOT_A_SHARE_LINK)
     if not SHARE_TOKEN_RE.match(token):
         raise ValueError("The share link is missing its seq=… part. Copy the whole link from Perso again.")
     return token
@@ -104,7 +111,8 @@ def get_shared_project(share_token: str, session=None, sleep: Callable[[float], 
         raise _error_from_response(resp)
     body = resp.json()
     project = body.get("result", body) if isinstance(body, dict) else {}
-    if not project.get("originalFileUrl") or not (project.get("translatedFileUrl") or project.get("lipSyncFileUrl")):
+    # A missing original is allowed here: the pipeline can take it from --original instead.
+    if not (project.get("translatedFileUrl") or project.get("lipSyncFileUrl")):
         raise PersoError("This shared project has no finished dubbed video yet. Wait until Perso finishes, then try again.")
     return project
 
@@ -113,17 +121,18 @@ def download_media(path: str, out_path: str, session=None, sleep: Callable[[floa
                    label: str = "video") -> str:
     """Streams a /perso-storage/... file (URL-encoded against the media host) to out_path, with retries."""
     session = session or requests.Session()
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    target = Path(out_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(3):
         try:
             with session.get(media_url(path), stream=True, timeout=600) as resp:
                 if resp.status_code != 200:
                     raise PersoError("Downloading the videos from Perso failed. Try again in a minute.")
-                tmp = out_path + ".part"
+                tmp = target.with_name(target.name + ".part")
                 with open(tmp, "wb") as f:
                     for chunk in resp.iter_content(1 << 20):
                         f.write(chunk)
-                os.replace(tmp, out_path)
+                os.replace(tmp, target)
             return out_path
         except (requests.RequestException, PersoError):
             if attempt == 2:

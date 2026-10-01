@@ -64,5 +64,5 @@ def test_options_are_passed_through(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "run_share_evaluation", run)
     cli.main(["link", "--script-file", str(script), "--no-lipsync", "--no-translation-check", "--whisper-model", "base"])
     assert seen["ground_truth_text"] == "안녕하세요" and seen["include_lipsync"] is False
-    assert seen["report_lang"] == "en"
+    assert seen["report_lang"] == "ko" and seen["out_dir"] == "output"          # defaults: Korean, ./output
     assert seen["use_translation_judge"] is False and seen["whisper_model_name"] == "base"
