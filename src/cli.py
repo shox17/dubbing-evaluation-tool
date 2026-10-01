@@ -2,6 +2,7 @@
 
     python qa.py "<share link>" --out ./output --lang ko
     python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
+    python qa.py batch links.txt --out ./output/batch       (one link per line, optionally ",good|check|poor")
 
 Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
 mode saves comparison.* plus report_A.* and report_B.*.
@@ -69,6 +70,18 @@ def parse_compare_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def parse_batch_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for batch mode."""
+    ap = argparse.ArgumentParser(prog="qa.py batch", description="Evaluate every share link in a file and write one "
+                                 "summary (summary.csv / .txt / .json). Add your own verdict after a link "
+                                 "(link,good / check / poor) to see how often the tool agrees with you.")
+    ap.add_argument("file", help="Text or CSV file: one share link per line, optionally followed by ,good / ,check / ,poor")
+    _common(ap)
+    args = ap.parse_args(argv)
+    args.mode = "batch"
+    return args
+
+
 @contextlib.contextmanager
 def quiet_native_stderr(enabled: bool):
     """Sends C++ library logs (MediaPipe writes straight to fd 2) to the null device; yields a stream for our messages."""
@@ -102,11 +115,13 @@ def use_utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Runs one evaluation or a comparison. Exit codes: 0 done, 1 see below, 2 input or runtime error.
 
-    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when both dubs are Poor.
+    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when both dubs are Poor. Batch mode: 0 when every
+    link was evaluated, 2 when any link failed (the summary is written either way).
     """
     use_utf8_console()
     argv = sys.argv[1:] if argv is None else argv
-    args = parse_compare_args(argv[1:]) if argv[:1] == ["compare"] else parse_args(argv)
+    parsers = {"compare": parse_compare_args, "batch": parse_batch_args}
+    args = parsers[argv[0]](argv[1:]) if argv[:1] and argv[0] in parsers else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
         return _run(args, err)
@@ -146,6 +161,8 @@ def _run(args: argparse.Namespace, err) -> int:
                    include_lipsync=False if args.no_lipsync else None,
                    use_translation_judge=not args.no_translation_check, report_lang=args.lang,
                    original=args.original, use_cache=not args.no_cache)
+    if args.mode == "batch":
+        return _run_batch(args, options, err)
     try:
         if args.mode == "compare":
             run = run_comparison(args.url_a, args.url_b, out_dir=args.out, **options)
@@ -175,6 +192,29 @@ def _run(args: argparse.Namespace, err) -> int:
     if files:
         print(f"\nSaved: {files['html']}\n       {files['json']}", file=err)
     return 1 if rep["overall"]["level"] in FAIL_LEVELS[args.fail_on] else 0
+
+
+def _run_batch(args: argparse.Namespace, options: dict, err) -> int:
+    """Batch mode: evaluate every link in the file, print the summary, write summary files."""
+    from src.batch import parse_batch_file, render_batch_text
+    from src.pipeline import run_batch
+    try:
+        entries = parse_batch_file(Path(args.file).read_text(encoding="utf-8-sig"))
+    except OSError as e:
+        print(f"Can't read the batch file: {e}", file=err)
+        return 2
+    except ValueError as e:
+        print(f"Could not read the batch file: {e}", file=err)
+        return 2
+    try:
+        batch = run_batch(entries, args.out, **options)
+    except (Cancelled, KeyboardInterrupt):
+        print("\nStopped.", file=err)
+        return 2
+    print(json.dumps({"rows": batch["rows"], "agreement": batch["agreement"]}, ensure_ascii=False, indent=2)
+          if args.json else render_batch_text(batch["rows"], args.lang))
+    print("\nSaved: " + "\n       ".join(batch["files"][k] for k in ("csv", "text", "json")), file=err)
+    return 2 if any(r["error"] for r in batch["rows"]) else 0
 
 
 if __name__ == "__main__":

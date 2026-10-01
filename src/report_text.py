@@ -1069,4 +1069,34 @@ REPORT_TEXT = {
                  "ko": "Dubbing QA Studio {version} · 실행 시간 {sec}초 · {time}",
                  "pt": "Dubbing QA Studio {version} · tempo de execução {sec} s · {time}",
                  "es": "Dubbing QA Studio {version} · tiempo de ejecución {sec} s · {time}"},
+
+    # ----- batch mode (src/batch.py) -----
+    "b.title": {"en": "Batch summary", "ko": "일괄 평가 요약", "pt": "Resumo do lote", "es": "Resumen del lote"},
+    "b.counts": {"en": "{n} links: {good} Good · {check} Needs review · {poor} Poor · {failed} failed",
+                 "ko": "링크 {n}개: 좋음 {good} · 검토 필요 {check} · 미흡 {poor} · 실패 {failed}",
+                 "pt": "{n} links: {good} Bom · {check} Requer revisão · {poor} Ruim · {failed} com falha",
+                 "es": "{n} enlaces: {good} Bien · {check} Requiere revisión · {poor} Deficiente · {failed} con error"},
+    "b.failed": {"en": "could not evaluate", "ko": "평가하지 못함", "pt": "não foi possível avaliar", "es": "no se pudo evaluar"},
+    "b.person": {"en": "person", "ko": "사람", "pt": "pessoa", "es": "persona"},
+    "b.meaning": {"en": "meaning", "ko": "의미", "pt": "sentido", "es": "sentido"},
+    "b.items": {"en": "{poor} Poor, {check} Check", "ko": "미흡 {poor}, 확인 필요 {check}", "pt": "{poor} Ruim, {check} Verificar",
+                "es": "{poor} Deficiente, {check} Revisar"},
+    "b.agreement": {
+        "en": "Agreement with your verdicts: {agree} of {n} ({pct}%). Stricter than you: {strict}. More lenient: {lenient}.",
+        "ko": "사람 판정과 일치: {n}개 중 {agree}개({pct}%). 사람보다 엄격: {strict}, 사람보다 관대: {lenient}.",
+        "pt": "Concordância com seus resultados: {agree} de {n} ({pct}%). Mais rigoroso que você: {strict}. Mais "
+              "brando: {lenient}.",
+        "es": "Coincidencia con tus resultados: {agree} de {n} ({pct}%). Más estricto que tú: {strict}. Más "
+              "permisivo: {lenient}.",
+    },
+    "b.person_tool": {"en": "person ↓ / tool →", "ko": "사람 ↓ / 도구 →", "pt": "pessoa ↓ / ferramenta →",
+                      "es": "persona ↓ / herramienta →"},
+    "b.no_labels": {
+        "en": "Add your own verdict after a link (link,good / check / poor) to see how often the tool agrees with you.",
+        "ko": "링크 뒤에 직접 판정을 붙이면(링크,good / check / poor) 도구가 얼마나 사람과 일치하는지 볼 수 있습니다.",
+        "pt": "Adicione seu resultado depois de um link (link,good / check / poor) para ver quanto a ferramenta concorda "
+              "com você.",
+        "es": "Añade tu resultado después de un enlace (enlace,good / check / poor) para ver cuánto coincide la "
+              "herramienta contigo.",
+    },
 }

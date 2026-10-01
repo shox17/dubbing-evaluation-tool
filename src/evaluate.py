@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
+import torch
 import librosa
 import whisper
 import jiwer
@@ -56,6 +57,8 @@ MISMATCH_MIN_SEC = 0.5             # only-one-track-speaks stretches shorter tha
 MAX_MISMATCHES = 50                # longest mismatches kept (every one becomes a problem interval)
 WHISPER_LOGPROB_OK = -1.0          # Whisper's own thresholds for trusting a segment
 WHISPER_NO_SPEECH_OK = 0.6
+WHISPER_SEED = 0                   # fixed seed for Whisper's fallback sampling: same audio → same transcript
+CACHE_VERSION = 2                  # bump when cached Whisper results would change (2: seeded transcription)
 CLIP_MERGE_GAP_SEC = 0.5           # clipped samples closer than this form one distortion interval
 MAX_CLIP_INTERVALS = 50
 LANG_WINDOW_SEC = 10.0             # the dub's language is checked per window of this length...
@@ -173,9 +176,12 @@ def whisper_language(code: Optional[str]) -> Optional[str]:
 def transcribe(y: np.ndarray, whisper_model, language: Optional[str] = None) -> dict:
     """Transcribes a 16kHz waveform with Whisper, keeping segment confidence and word timings.
 
-    language=None lets Whisper detect it.
+    language=None lets Whisper detect it. Whisper falls back to random sampling when it is unsure, so the same
+    audio could give different transcripts (and scores) run to run; a fixed seed makes it repeatable.
     """
-    result = whisper_model.transcribe(y, language=language, fp16=False, word_timestamps=True)
+    with torch.random.fork_rng():
+        torch.manual_seed(WHISPER_SEED)
+        result = whisper_model.transcribe(y, language=language, fp16=False, word_timestamps=True)
     segments = []
     for s in result.get("segments", []):
         segments.append({
@@ -605,12 +611,12 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     src_lang = whisper_language(source_lang) if source_lang else None
     stt_lang = whisper_language(target_lang)
     step("Transcribing the original speech...", 0.20)
-    orig_stt = cached(f"stt|{whisper_model_name}|{src_lang or 'auto'}|{orig_id}",
+    orig_stt = cached(f"v{CACHE_VERSION}|stt|{whisper_model_name}|{src_lang or 'auto'}|{orig_id}",
                       lambda: transcribe(y_orig, model(), language=src_lang))
     step("Checking which language the dub is in...", 0.40)
-    dub_detected, dub_detected_prob = cached(f"lang|{whisper_model_name}|{dub_id}", lambda: detect_language(y_dub, model()))
+    dub_detected, dub_detected_prob = cached(f"v{CACHE_VERSION}|lang|{whisper_model_name}|{dub_id}", lambda: detect_language(y_dub, model()))
     step("Transcribing the dubbed speech...", 0.45)
-    dub_stt = cached(f"stt|{whisper_model_name}|{stt_lang or 'auto'}|{dub_id}",
+    dub_stt = cached(f"v{CACHE_VERSION}|stt|{whisper_model_name}|{stt_lang or 'auto'}|{dub_id}",
                      lambda: transcribe(y_dub, model(), language=stt_lang))
     scores = score_transcript(ground_truth_text, dub_stt["text"], target_lang)
 
@@ -620,7 +626,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
     step("Checking the dub's language part by part...", 0.67)
-    lang_windows = cached(f"langwin2|{whisper_model_name}|{stt_lang}|{dub_id}",
+    lang_windows = cached(f"v{CACHE_VERSION}|langwin|{whisper_model_name}|{stt_lang}|{dub_id}",
                           lambda: language_windows(y_dub, model(), orig_speech + dub_speech, stt_lang))
     integrity = video_integrity(original_video_path, dubbed_video_path)
 

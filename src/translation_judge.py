@@ -97,6 +97,13 @@ def judge_configured() -> bool:
     return judge_provider() is not None
 
 
+def judge_fingerprint() -> str:
+    """What decides the judge's answer besides the transcripts: provider, models, thinking, prompt and schema.
+    Changing any of them invalidates cached reviews."""
+    return json.dumps([judge_provider(), GEMINI_MODELS, GEMINI_THINKING, CLAUDE_MODEL, SYSTEM_PROMPT, RESULT_SCHEMA],
+                      sort_keys=True)
+
+
 def not_measured(key: str, **params) -> dict:
     """The result when the translation couldn't be checked: a translatable reason key, plus the English text."""
     from src.i18n import t

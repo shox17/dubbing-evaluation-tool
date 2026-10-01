@@ -77,3 +77,23 @@ def test_opencv_gets_an_ascii_path_on_windows(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "name", "nt")
     monkeypatch.chdir(tmp_path / "사용자")
     assert _cv2_path(video) == os.path.join("a", "v.mp4")     # relative path is plain ASCII
+
+
+def test_transcription_is_repeatable_despite_whisper_sampling():
+    import torch
+    from src.evaluate import transcribe
+
+    class SamplingModel:
+        """Stands in for Whisper's temperature fallback: the output depends on torch's random numbers."""
+        def transcribe(self, y, **kw):
+            t = round(float(torch.rand(1)), 4)
+            return {"text": str(t), "language": "en",
+                    "segments": [{"start": 0.0, "end": t, "text": str(t), "avg_logprob": -0.1, "no_speech_prob": 0.0}]}
+    y = np.zeros(1600, dtype=np.float32)
+    before = torch.rand(1)                               # the caller's random stream isn't reset by transcribe
+    assert transcribe(y, SamplingModel()) == transcribe(y, SamplingModel())
+    torch.manual_seed(123)
+    expected = torch.rand(1)
+    torch.manual_seed(123)
+    transcribe(y, SamplingModel())
+    assert torch.equal(torch.rand(1), expected) and before is not None

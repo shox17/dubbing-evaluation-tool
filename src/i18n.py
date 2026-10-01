@@ -60,6 +60,8 @@ TEXT = {
     "stage.evaluate": {"en": "Measure quality", "ko": "품질 측정", "pt": "Medir a qualidade", "es": "Medir la calidad"},
     "stage.dub_a": {"en": "Evaluate dub A", "ko": "더빙 A 평가", "pt": "Avaliar a dublagem A", "es": "Evaluar el doblaje A"},
     "stage.dub_b": {"en": "Evaluate dub B", "ko": "더빙 B 평가", "pt": "Avaliar a dublagem B", "es": "Evaluar el doblaje B"},
+    "stage.batch": {"en": "Evaluate every link", "ko": "모든 링크 평가", "pt": "Avaliar todos os links",
+                    "es": "Evaluar todos los enlaces"},
     "stage.compare": {"en": "Compare and recommend", "ko": "비교 및 추천", "pt": "Comparar e recomendar",
                       "es": "Comparar y recomendar"},
 

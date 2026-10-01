@@ -17,12 +17,13 @@ from typing import Callable, Optional
 
 from dotenv import load_dotenv
 
+from src.batch import agreement, render_batch_text, summary_row, to_csv
 from src.compare import build_comparison, render_comparison_html, render_comparison_text
 from src.evaluate import run_full_evaluation, DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
 from src.perso_api import PersoError, download_media, get_shared_project, parse_share_url
 from src.report import build_report, render_html, render_text
-from src.translation_judge import judge_translation, not_measured
+from src.translation_judge import judge_fingerprint, judge_translation, not_measured
 
 log = logging.getLogger(__name__)
 
@@ -259,22 +260,34 @@ def evaluate_share(
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "logs": "Read from a Perso share link; videos and speech recognition are cached per link. No credits were spent.",
     }
-    check_translation(eval_results, use_translation_judge, notify)
+    check_translation(eval_results, use_translation_judge, notify, cache=JsonCache(folder / "judge_cache.json"))
     return eval_results
 
 
-def check_translation(results: dict, enabled: bool, notify: Callable[..., None]) -> None:
-    """Adds the translation check to results; any failure becomes a not-measured result, never an error."""
+def check_translation(results: dict, enabled: bool, notify: Callable[..., None], cache=None) -> None:
+    """Adds the translation check to results; any failure becomes a not-measured result, never an error.
+
+    A successful review is cached (when cache is given) under a fingerprint of both transcripts, the languages,
+    the prompt and the models, so a rerun of the same link gets the same answer without another API call.
+    Failures are never cached: the next run tries again.
+    """
     if not enabled:
         results["translation_judge"] = not_measured("r.judge.off")
         return
     notify("evaluate", "Checking the translation...", 0.96)
     sr, meta, share = results["speech_recognition"], results["metadata"], results["pipeline"]["share"]
     name = lambda label, code: f"{label} ({code})" if label and code else (label or code or "unknown")
-    results["translation_judge"] = judge_translation(
-        sr.get("original_segments") or [], sr.get("dubbed_segments") or [],
-        name(share.get("source_language_name"), meta.get("detected_source_language")),
-        name(share.get("target_language_name"), meta.get("target_language")))
+    args = (sr.get("original_segments") or [], sr.get("dubbed_segments") or [],
+            name(share.get("source_language_name"), meta.get("detected_source_language")),
+            name(share.get("target_language_name"), meta.get("target_language")))
+    key = _short_hash(json.dumps([args, judge_fingerprint()], ensure_ascii=False, sort_keys=True))
+    cached = cache.get(key) if cache is not None else None
+    if cached:
+        results["translation_judge"] = {**cached, "cached": True}
+        return
+    results["translation_judge"] = judge_translation(*args)
+    if cache is not None and results["translation_judge"].get("measured"):
+        cache[key] = results["translation_judge"]
 
 
 def _notifier(report: Optional[Callable[[Progress], None]]):
@@ -388,3 +401,34 @@ def run_comparison(
     files = save_comparison_files(comp, results, out_dir)
     outer("compare", "Comparing the two dubs...", 1.0)
     return {"comparison": comp, "results": results, "files": files}
+
+
+def run_batch(entries: list[dict], out_dir: str, report_lang: str = "ko",
+              report: Optional[Callable[[Progress], None]] = None, cancel_event: Optional[threading.Event] = None,
+              session=None, sleep: Callable[[float], None] = time.sleep, **options) -> dict:
+    """Evaluates every link of a batch (see src/batch.py) and writes summary.csv / .txt / .json plus one report
+    folder per link. A link that fails is recorded with its error; the batch goes on. Returns {"rows", "files"}."""
+    folder = Path(out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    outer, check_cancel = _notifier(report), _canceller(cancel_event)
+    rows = []
+    for n, entry in enumerate(entries, 1):
+        check_cancel()
+        outer("batch", f"{n}/{len(entries)} {entry['link']}", (n - 1) / len(entries))
+        inner = lambda p, _n=n: outer("batch", f"{_n}/{len(entries)} · {p.message}", (_n - 1) / len(entries))
+        try:
+            results = run_share_evaluation(entry["link"], report_lang=report_lang, out_dir=str(folder / f"{n:03d}"),
+                                           report=inner, cancel_event=cancel_event, session=session, sleep=sleep,
+                                           **options)
+            rows.append(summary_row(n, entry, results))
+        except Cancelled:
+            raise
+        except Exception as e:  # one broken link must not stop the batch
+            log.warning("Batch link %d failed: %s", n, e)
+            rows.append(summary_row(n, entry, error=str(e) or e.__class__.__name__))
+    files = {"csv": folder / "summary.csv", "text": folder / "summary.txt", "json": folder / "summary.json"}
+    files["csv"].write_text(to_csv(rows), encoding="utf-8-sig")       # BOM: Excel opens Korean text correctly
+    files["text"].write_text(render_batch_text(rows, report_lang), encoding="utf-8")
+    _write_json(files["json"], {"rows": rows, "agreement": agreement(rows)})
+    outer("batch", "Done", 1.0)
+    return {"rows": rows, "agreement": agreement(rows), "files": {k: str(v) for k, v in files.items()}}
