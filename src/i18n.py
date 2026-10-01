@@ -70,6 +70,8 @@ TEXT = {
     # ----- progress page -----
     "progress.title": {"en": "Evaluating the dub", "ko": "더빙 평가 중", "pt": "Avaliando a dublagem",
                        "es": "Evaluando el doblaje"},
+    "progress.title_compare": {"en": "Evaluating both dubs", "ko": "두 더빙 평가 중", "pt": "Avaliando as duas dublagens",
+                               "es": "Evaluando los dos doblajes"},
     "progress.overall": {"en": "Overall", "ko": "전체", "pt": "Total", "es": "Total"},
     "progress.elapsed": {"en": "Elapsed", "ko": "경과 시간", "pt": "Tempo decorrido", "es": "Tiempo transcurrido"},
     "progress.stop": {"en": "Stop waiting", "ko": "기다리기 중지", "pt": "Parar de esperar", "es": "Dejar de esperar"},
@@ -313,6 +315,43 @@ TEXT = {
     },
     "share.start": {"en": "Evaluate this dub", "ko": "이 더빙 평가하기", "pt": "Avaliar esta dublagem",
                     "es": "Evaluar este doblaje"},
+    "mode.single": {"en": "Check one dub", "ko": "더빙 하나 확인", "pt": "Verificar uma dublagem", "es": "Revisar un doblaje"},
+    "mode.compare": {"en": "Compare two dubs", "ko": "더빙 두 개 비교", "pt": "Comparar duas dublagens",
+                     "es": "Comparar dos doblajes"},
+    "compare.title": {"en": "① Paste two Perso share links", "ko": "① Perso 공유 링크 두 개 붙여넣기",
+                      "pt": "① Cole dois links de compartilhamento da Perso", "es": "① Pega dos enlaces compartidos de Perso"},
+    "compare.caption": {
+        "en": "Two dubs of the same video (for example two versions, or with and without lip-sync). Both are measured "
+              "the same way, and the tool recommends which one to deliver and explains why.",
+        "ko": "같은 영상의 더빙 두 개를 넣으세요(예: 두 가지 버전, 립싱크 있음/없음). 두 더빙을 같은 방식으로 측정하고 "
+              "어느 쪽을 납품할지 추천하며 이유를 설명합니다.",
+        "pt": "Duas dublagens do mesmo vídeo (por exemplo, duas versões, ou com e sem sincronização labial). As duas são "
+              "medidas do mesmo jeito, e a ferramenta recomenda qual entregar e explica por quê.",
+        "es": "Dos doblajes del mismo video (por ejemplo, dos versiones, o con y sin sincronización labial). Los dos se "
+              "miden igual, y la herramienta recomienda cuál entregar y explica por qué.",
+    },
+    "compare.start": {"en": "Evaluate and compare", "ko": "평가하고 비교하기", "pt": "Avaliar e comparar",
+                      "es": "Evaluar y comparar"},
+    "compare.same_link": {
+        "en": "Both links point to the same Perso project, so the comparison will show the same dub twice.",
+        "ko": "두 링크가 같은 Perso 프로젝트를 가리켜 같은 더빙을 두 번 비교하게 됩니다.",
+        "pt": "Os dois links apontam para o mesmo projeto Perso, então a comparação mostrará a mesma dublagem duas vezes.",
+        "es": "Los dos enlaces apuntan al mismo proyecto de Perso, así que la comparación mostrará el mismo doblaje dos "
+              "veces.",
+    },
+    "problem.compare": {"en": "Paste two valid Perso share links first.", "ko": "먼저 올바른 Perso 공유 링크 두 개를 붙여 넣으세요.",
+                        "pt": "Cole primeiro dois links de compartilhamento válidos da Perso.",
+                        "es": "Pega primero dos enlaces compartidos válidos de Perso."},
+    "compare.download_html": {"en": "Download comparison", "ko": "비교 보고서 다운로드", "pt": "Baixar comparação",
+                              "es": "Descargar comparación"},
+    "compare.download_html_help": {
+        "en": "One HTML file with the recommendation, problem intervals, reasoning and every check side by side.",
+        "ko": "추천, 문제 구간, 판단 근거, 전체 항목 비교가 담긴 HTML 파일 하나입니다.",
+        "pt": "Um arquivo HTML com a recomendação, os trechos com problemas, a justificativa e todas as verificações.",
+        "es": "Un archivo HTML con la recomendación, los tramos con problemas, el razonamiento y todas las comprobaciones.",
+    },
+    "compare.download_json": {"en": "Download data (JSON)", "ko": "데이터 다운로드(JSON)", "pt": "Baixar dados (JSON)",
+                              "es": "Descargar datos (JSON)"},
     "problem.share": {"en": "Paste a Perso share link first.", "ko": "먼저 Perso 공유 링크를 붙여 넣으세요.",
                       "pt": "Primeiro, cole um link de compartilhamento da Perso.",
                       "es": "Primero, pega un enlace compartido de Perso."},

@@ -1,8 +1,8 @@
 """Dubbing QA Studio: the Streamlit UI.
 
-Three pages, picked by the router at the bottom: setup (paste a Perso share link), progress (a background job is
-running) and results (the report). All fetching, measuring and report building happens in src/; this file only
-shows it.
+Pages, picked by the router at the bottom: setup (paste one Perso share link, or two to compare), progress (a
+background job is running), results (one dub's report) and comparison (two dubs side by side with a
+recommendation). All fetching, measuring, deciding and report building happens in src/; this file only shows it.
 """
 import os
 import html
@@ -20,7 +20,9 @@ from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
 from src import i18n, perso_api
 from src.jobs import get_job, start_job
 from src.perso_api import PersoError, media_url, parse_share_url
-from src.pipeline import load_results, run_share_evaluation, share_stages
+from src.compare import build_comparison, render_comparison_html
+from src.pipeline import (compare_stages, load_results, new_run_dir, prune_old_runs, run_comparison,
+                          run_share_evaluation, share_stages)
 from src.report import build_report, fmt_time, render_html
 from src.translation_judge import judge_provider
 
@@ -31,13 +33,13 @@ st.set_page_config(page_title="Dubbing QA Studio", page_icon=":material/movie:",
 RESULTS_SCHEMA_VERSION = 6
 assert RESULTS_SCHEMA_VERSION == SCHEMA_VERSION, "bump RESULTS_SCHEMA_VERSION together with evaluate.SCHEMA_VERSION"
 # Widget values that must survive while the setup form is hidden (progress/results views).
-FORM_KEYS = ["ui_lang", "share_url"]
+FORM_KEYS = ["ui_lang", "share_url", "share_url_a", "share_url_b"]
 
 for k in FORM_KEYS:
     if k in st.session_state:
         st.session_state[k] = st.session_state[k]
-for k, v in {"share_url": "",
-             "seek": 0}.items():
+for k, v in {"share_url": "", "share_url_a": "", "share_url_b": "",
+             "seek": 0, "seek_A": 0, "seek_B": 0}.items():
     st.session_state.setdefault(k, v)
 st.session_state.setdefault("ui_lang", pick_ui_language(st.context.locale))
 
@@ -109,6 +111,13 @@ def open_results(results: Optional[dict] = None):
         st.session_state.results = results
 
 
+def open_comparison(run: dict):
+    """Switches to the comparison page for a finished compare job (button callback)."""
+    st.query_params.clear()
+    st.session_state.view = "compare"
+    st.session_state.compare_run = run
+
+
 def new_evaluation():
     """Clears the current job and goes back to the setup page (button callback)."""
     st.query_params.clear()
@@ -143,14 +152,15 @@ with st.sidebar:
         st.markdown(t("how.body"))
 
     saved = load_results()
-    if saved and saved.get("schema_version") == RESULTS_SCHEMA_VERSION and st.session_state.get("view") != "results":
+    if saved and saved.get("schema_version") == RESULTS_SCHEMA_VERSION and st.session_state.get("view") not in ("results", "compare"):
         st.button(t("sidebar.last_result"), icon=":material/history:", width="stretch", on_click=open_results, args=(saved,))
 
 
 # ---------------- progress view ----------------
 def render_progress(job):
     """Progress page for a running job: overall %, elapsed time and a live stage checklist."""
-    st.title(t("progress.title"), icon=":material/hourglass_top:")
+    st.title(t("progress.title_compare" if job.stages == compare_stages() else "progress.title"),
+             icon=":material/hourglass_top:")
     st.caption(html.escape(job.params.get("title") or job.params["share_url"]))
 
     @st.fragment(run_every=2)
@@ -372,9 +382,18 @@ def render_results(r: dict):
 
 # ---------------- setup view ----------------
 def render_setup():
-    """Setup page: paste the link, preview the project, choose options, evaluate."""
+    """Setup page: pick one dub or a comparison, paste the link(s), preview the project(s), evaluate."""
     st.title(t("setup.title"), icon=":material/movie_edit:")
     st.markdown(f":gray[{t('setup.intro')}]")
+    single, compare = st.tabs([f":material/movie: {t('mode.single')}", f":material/compare: {t('mode.compare')}"])
+    with compare:
+        render_compare_setup()
+    with single:
+        render_single_setup()
+
+
+def render_single_setup():
+    """Setup for one dub: paste the link, preview the project, evaluate."""
     project, token = None, None
     with st.container(border=True):
         st.subheader(t("share.title"), icon=":material/link:")
@@ -414,12 +433,152 @@ def render_setup():
         st.rerun()
 
 
+# ---------------- compare mode ----------------
+def link_preview(url: str) -> Optional[dict]:
+    """A compact preview of one share link (title, languages, length, lip-sync); the project, or None if unusable."""
+    if not url.strip():
+        return None
+    try:
+        token = parse_share_url(url)
+    except ValueError as e:
+        st.error(translate_message(str(e), st.session_state.ui_lang), icon=":material/link_off:")
+        return None
+    with st.spinner():
+        project = shared_project(token)
+    if "error" in project:
+        st.error(translate_message(project["error"], st.session_state.ui_lang), icon=":material/error:")
+        return None
+    if project.get("thumbnailUrl"):
+        st.image(media_url(project["thumbnailUrl"]))
+    st.markdown(f"**{html.escape(project.get('title') or '')}**")
+    st.markdown(project_info(project))
+    return project
+
+
+def render_compare_setup():
+    """Setup for compare mode: two share links side by side, one button."""
+    projects = {}
+    with st.container(border=True):
+        st.subheader(t("compare.title"), icon=":material/compare:")
+        st.caption(t("compare.caption"))
+        for col, dub in zip(st.columns(2), ("A", "B")):
+            with col:
+                st.markdown(f"**{t('c.dub', d=dub)}**")
+                st.text_input(t("c.dub", d=dub), key=f"share_url_{dub.lower()}", placeholder=t("share.placeholder"),
+                              label_visibility="collapsed")
+                projects[dub] = link_preview(st.session_state[f"share_url_{dub.lower()}"])
+        if all(projects.values()) and projects["A"].get("seq") == projects["B"].get("seq"):
+            st.warning(t("compare.same_link"), icon=":material/content_copy:")
+        if not judge_provider():
+            st.caption(f":orange[:material/key_off:] {t('share.judge_missing')}")
+    ready = all(projects.values())
+    if not ready:
+        st.warning(t("problem.compare"), icon=":material/info:")
+    if st.button(t("compare.start"), key="start_compare", type="primary", icon=":material/compare_arrows:",
+                 disabled=not ready, width="stretch"):
+        params = dict(url_a=st.session_state.share_url_a.strip(), url_b=st.session_state.share_url_b.strip(),
+                      report_lang=st.session_state.ui_lang)
+        _, folder = new_run_dir()
+        prune_old_runs(protect=folder)
+        job = start_job(lambda report, cancel: run_comparison(**params, out_dir=folder, report=report, cancel_event=cancel),
+                        {**params, "share_url": params["url_a"],
+                         "title": f"A: {projects['A'].get('title')}  ·  B: {projects['B'].get('title')}"},
+                        compare_stages())
+        st.query_params["job"] = job.id
+        st.rerun()
+
+
+def seek_dub(dub: str, sec: Optional[float]):
+    """Starts dub A's or B's video from sec (button callback for a problem interval)."""
+    st.session_state[f"seek_{dub}"] = max(0, int(sec or 0))
+
+
+def cell(c: Optional[dict]) -> str:
+    """One dub's level and value for the side-by-side table."""
+    return f"{c['badge']} · {c['display']}" if c else "—"
+
+
+def render_comparison(run: dict):
+    """Comparison page: recommendation, problem intervals per dub (with their videos), reasoning, then details."""
+    res = run["results"]
+    # Rebuilt on every run so the page follows the interface language.
+    comp = build_comparison(res["A"], res["B"], st.session_state.ui_lang, run["comparison"]["meta"].get("run_seconds"))
+    lb, rec, why = comp["labels"], comp["recommendation"], comp["reasoning"]
+    st.title(lb["title"], icon=":material/compare:")
+    with st.container(horizontal=True):
+        st.download_button(t("compare.download_html"), render_comparison_html(comp), file_name="comparison.html",
+                           mime="text/html", icon=":material/description:", help=t("compare.download_html_help"))
+        st.download_button(t("compare.download_json"),
+                           json.dumps({k: v for k, v in comp.items() if k != "reports"}, ensure_ascii=False, indent=2),
+                           file_name="comparison.json", mime="application/json", icon=":material/download:")
+        st.button(t("results.new"), type="primary", icon=":material/add:", on_click=new_evaluation)
+
+    with st.container(border=True):
+        icon = {"good": ":green[:material/verified:]", "check": ":orange[:material/rule:]",
+                "poor": ":red[:material/report:]"}[rec["verdict"]]
+        st.markdown(f"**1. {lb['sec.recommended']}**")
+        st.markdown(f"### {icon} {html.escape(rec['headline'])}")
+        st.markdown(f"{lb['dub_' + rec['dub']]}: **{html.escape(rec['title'] or '')}** · {badge(rec['verdict'])}")
+        if rec["warning"]:
+            st.error(rec["warning"], icon=":material/report:")
+            st.markdown(f"**{lb['fix_first']}**\n" + "\n".join(f"1. {html.escape(x)}" for x in rec["fix_first"]))
+
+    st.markdown(f"**2. {lb['sec.intervals']}**")
+    for col, dub in zip(st.columns(2), ("A", "B")):
+        with col.container(border=True):
+            p = res[dub].get("pipeline", {})
+            verdict = comp["facts"][dub]["verdict"]
+            st.markdown(f"**{lb['dub_' + dub]}** {badge(verdict)}  \n:gray[{html.escape(comp['links'][dub]['title'] or '')}]")
+            if os.path.exists(p.get("dubbed_video_path", "")):
+                st.video(p["dubbed_video_path"], start_time=st.session_state.get(f"seek_{dub}", 0))
+            st.caption(lb[f"count_{dub}"])
+            for n, i in enumerate(comp["intervals"][dub]):
+                c1, c2 = st.columns([2, 7], vertical_alignment="center")
+                c1.button(f"{i['start']:.1f}s", key=f"seek_{dub}_{n}", icon=":material/play_arrow:", type="tertiary",
+                          help=t("report.jump_help"), on_click=seek_dub, args=(dub, i["start"]))
+                color = "red" if i["severity"] == "poor" else "orange"
+                c2.markdown(f":{color}-badge[{html.escape(i['category_label'])}] {html.escape(i['description'])} "
+                            f":gray[(→ {i['end']:.1f}s · {html.escape(i['check_label'])})]")
+            if not comp["intervals"][dub]:
+                st.caption(lb["no_intervals"])
+            if comp["possible_asr_errors"][dub]:
+                with st.expander(lb["asr"]):
+                    for i in comp["possible_asr_errors"][dub]:
+                        st.caption(f"{i['start']:.1f}s · {html.escape(i['category_label'])}: {html.escape(i['description'])}")
+
+    with st.container(border=True):
+        st.markdown(f"**3. {lb['sec.reasoning']}**")
+        st.markdown(f"**{lb['rule_label']}:** {html.escape(why['rule_label'])}")
+        with st.container(horizontal=True):
+            st.metric(lb["dub_A"], why["values"]["A"], border=True)
+            st.metric(lb["dub_B"], why["values"]["B"], border=True)
+        st.markdown(html.escape(" ".join(why["summary"])))
+        st.caption(why["translation_note"] + (f" {lb['skipped']}: {', '.join(why['skipped_rules'])}."
+                                              if why["skipped_rules"] else ""))
+        st.caption(why["rules_order"])
+
+    st.markdown(f"**{lb['sec.table']}**")
+    st.dataframe(pd.DataFrame([(r["label"], cell(r["A"]), cell(r["B"])) for r in comp["table"]],
+                              columns=[lb["table.check"], lb["dub_A"], lb["dub_B"]]), hide_index=True, width="stretch")
+    with st.expander(lb["sec.links"], icon=":material/link:"):
+        for col, dub in zip(st.columns(2), ("A", "B")):
+            link = comp["links"][dub]
+            col.markdown(f"**{lb['dub_' + dub]}**\n" + "\n".join(
+                f"- **{lb['meta.' + k]}:** {html.escape(str(link[k]))}"
+                for k in ("title", "languages", "length", "lipsync", "project", "evaluated", "link")))
+    st.caption(f"**{lb['sec.notes']}:** " + " · ".join(html.escape(n) for n in comp["notes"]))
+    st.caption(lb["footer"])
+
+
 # ---------------- router ----------------
 job = get_job(st.query_params.get("job"))
 if job is not None and job.status == "running":
     render_progress(job)
 elif job is not None and job.status == "done":
-    open_results(job.result)
+    if "comparison" in (job.result or {}):
+        open_comparison(job.result)
+    else:
+        open_results(job.result)
     st.rerun()
 elif job is not None:
     cancelled = job.status == "cancelled"
@@ -434,5 +593,7 @@ elif st.query_params.get("job"):
     st.button(t("back"), icon=":material/arrow_back:", on_click=new_evaluation)
 elif st.session_state.get("view") == "results" and st.session_state.get("results"):
     render_results(st.session_state.results)
+elif st.session_state.get("view") == "compare" and st.session_state.get("compare_run"):
+    render_comparison(st.session_state.compare_run)
 else:
     render_setup()

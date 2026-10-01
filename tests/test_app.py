@@ -165,3 +165,72 @@ def test_share_run_end_to_end_in_the_app(monkeypatch, isolated_output):
     at.run()
     assert not at.exception and at.title[0].value == "Results"
     assert "Length match" in all_text(at) and "Detailed measurements" in [s.value for s in at.subheader]
+
+
+# ---------------- compare mode ----------------
+def compare_run(a=None, b=None) -> dict:
+    """What run_comparison returns, for two sample dubs (A Poor, B Good by default)."""
+    from src.compare import build_comparison
+    a = a or make_results(acoustic_metrics={"dubbed_duration_sec": 40.0})
+    b = b or make_results()
+    b["pipeline"]["share"].update(seq=100002, title="QA sample.mp4 → ko (v2)")
+    return {"comparison": build_comparison(a, b, "en", run_seconds=12.0), "results": {"A": a, "B": b}, "files": {}}
+
+
+def test_compare_tab_needs_two_valid_links(shared):
+    from fake_perso import SHARE_URL_B
+    at = app()
+    assert at.tabs[1].label.endswith("Compare two dubs")
+    assert at.button(key="start_compare").disabled and "Paste two valid Perso share links first." in all_text(at)
+    at.text_input(key="share_url_a").set_value(SHARE_URL).run()
+    assert at.button(key="start_compare").disabled
+    at.text_input(key="share_url_b").set_value(SHARE_URL_B).run()
+    assert not at.exception and not at.button(key="start_compare").disabled
+    assert "same Perso project" in all_text(at)          # the fake answers both links with the same project
+
+
+def test_compare_job_runs_and_opens_the_comparison(shared, monkeypatch):
+    from fake_perso import SHARE_URL_B
+    from src import pipeline
+    seen = {}
+
+    def fake_compare(url_a, url_b, out_dir, report=None, cancel_event=None, **kw):
+        seen.update(url_a=url_a, url_b=url_b, out_dir=out_dir, **kw)
+        return compare_run()
+    monkeypatch.setattr(pipeline, "run_comparison", fake_compare)
+    at = app()
+    at.text_input(key="share_url_a").set_value(SHARE_URL).run()
+    at.text_input(key="share_url_b").set_value(SHARE_URL_B).run()
+    at.button(key="start_compare").click().run()
+    job = list(jobs._jobs.values())[-1]
+    while job.status == "running":
+        time.sleep(0.05)
+    assert job.status == "done" and job.stages == ["dub_a", "dub_b", "compare"]
+    assert (seen["url_a"], seen["url_b"], seen["report_lang"]) == (SHARE_URL, SHARE_URL_B, "en")
+    for _ in range(3):                        # the page follows the job: progress → done → comparison
+        if at.title and at.title[0].value == "Dub comparison":
+            break
+        at.run()
+    assert not at.exception and at.title[0].value == "Dub comparison"
+
+
+def test_comparison_page_shows_recommendation_intervals_and_reasoning_in_order():
+    at = app(view="compare", compare_run=compare_run())
+    assert not at.exception
+    text = all_text(at)
+    assert "### :green[:material/verified:] Deliver Dub B." in text
+    order = [text.index(x) for x in ("**1. Recommended version**", "**2. Problem intervals**", "**3. Reasoning**")]
+    assert order == sorted(order)
+    assert "**Deciding rule:** 1. Better overall verdict" in text and "Length match (Poor)" in text
+    seek = at.button(key="seek_B_0")
+    assert seek.label == "19.4s"
+    seek.click().run()
+    assert at.session_state["seek_B"] == 19 and at.session_state["seek_A"] == 0
+
+
+def test_comparison_page_follows_the_interface_language_and_warns_when_both_are_poor():
+    poor = make_results(acoustic_metrics={"dubbed_duration_sec": 40.0})
+    at = app(ui_lang="ko", view="compare", compare_run=compare_run(b=poor))
+    text = all_text(at)
+    assert at.title[0].value == "더빙 비교" and "**1. 추천 버전**" in text
+    assert "두 더빙 모두 납품할 준비가 되지 않았습니다" in text and "**먼저 고칠 것**" in text
