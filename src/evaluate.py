@@ -26,7 +26,7 @@ import imageio_ffmpeg
 log = logging.getLogger(__name__)
 
 SRC_DIR = Path(__file__).resolve().parent
-FACE_MODEL_PATH = str(SRC_DIR / "face_landmarker.task")
+FACE_MODEL_PATH = str(SRC_DIR / "models" / "face_landmarker.task")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 SAMPLE_RATE = 16000
 
@@ -58,7 +58,7 @@ MAX_MISMATCHES = 50                # longest mismatches kept (every one becomes 
 WHISPER_LOGPROB_OK = -1.0          # Whisper's own thresholds for trusting a segment
 WHISPER_NO_SPEECH_OK = 0.6
 WHISPER_SEED = 0                   # fixed seed for Whisper's fallback sampling: same audio → same transcript
-CACHE_VERSION = 2                  # bump when cached Whisper results would change (2: seeded transcription)
+CACHE_VERSION = 3                  # bump when cached results would change (2: seeded Whisper, 3: voice quality)
 CLIP_MERGE_GAP_SEC = 0.5           # clipped samples closer than this form one distortion interval
 MAX_CLIP_INTERVALS = 50
 LANG_WINDOW_SEC = 10.0             # the dub's language is checked per window of this length...
@@ -564,6 +564,16 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
     return {"value": round(count / speaking_sec, 2), "unit": unit}
 
 
+def _voice_quality(y_orig: np.ndarray, y_dub: np.ndarray, orig_speech: list, dub_speech: list) -> dict:
+    """Voice quality of both tracks (src/voice_quality.py); a missing model or runtime is not measured, never fatal."""
+    from src import voice_quality as vq
+    try:
+        return vq.voice_quality(y_orig, y_dub, orig_speech, dub_speech)
+    except Exception as e:  # onnxruntime missing or broken: the rest of the evaluation still counts
+        log.warning("Voice quality not measured: %s", e)
+        return vq.not_measured("r.vq.error")
+
+
 def _media_id(path: str) -> str:
     """A cache key for a media file: its name and size (cached downloads are named after their source)."""
     return f"{Path(path).name}:{Path(path).stat().st_size}"
@@ -625,6 +635,9 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     dub_speech = speech_intervals(dub_stt["segments"])
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
+    step("Rating the voice quality of both tracks...", 0.66)
+    vq = cached(f"v{CACHE_VERSION}|vq|{orig_id}|{dub_id}|{len(orig_speech)}|{len(dub_speech)}",
+                lambda: _voice_quality(y_orig, y_dub, orig_speech, dub_speech))
     step("Checking the dub's language part by part...", 0.67)
     lang_windows = cached(f"v{CACHE_VERSION}|langwin|{whisper_model_name}|{stt_lang}|{dub_id}",
                           lambda: language_windows(y_dub, model(), orig_speech + dub_speech, stt_lang))
@@ -696,6 +709,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "dubbed_speech": dub_speech
         },
         "video_integrity": integrity,
+        "voice_quality": vq,
         "lipsync_metrics": {
             "measured": include_lipsync,
             "valid": dub_ls["valid"],

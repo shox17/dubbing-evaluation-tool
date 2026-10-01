@@ -86,6 +86,15 @@ Whisper's language identification on the first 30 s of the dub. **Good** when it
 ### Voice clarity (`speech_clarity`)
 Share of speech time in Whisper segments with `avg_logprob ≥ −1.0` (Whisper's own threshold for trusting a decode). Segments Whisper itself treats as silence (`no_speech_prob > 0.6` and `avg_logprob < −1.0`) are ignored. Good ≥ 90%, Check ≥ 70%. The unclear segments are listed with timestamps under *Things to check*. It's an intelligibility proxy that needs no script; ASR weaknesses on names and accents also lower it.
 
+### Voice quality (`voice_quality.py`)
+Does the dub's voice sound clean, or robotic and distorted? Microsoft's **DNSMOS P.835** (bundled ONNX model, CC BY 4.0) predicts listener scores (1–5) for the speech signal (SIG), the background (BAK) and the overall sound (OVRL) on ~9 s windows, every 2 s (widened on long videos to at most 120 windows). Only windows where **both tracks speak at least 3 s** are scored, on both tracks at the same moment. A dub keeps the original's music and effects, so the comparison isolates the dub's own sound; absolute scores would mostly measure the music.
+
+A window is **Check** when the dub's SIG is ≥ 0.6 below the original's or its OVRL is ≥ 0.5 below, **Poor** from 1.0 / 0.9. The worst window sets the level, and flagged windows become `voice_quality` problem intervals. Not measured when the two tracks never speak together long enough, or when the original itself scores below 1.6 (too noisy to serve as reference).
+
+**Why both scores:** in tests on two real EN→ES Perso dubs, a robotic (quantised) voice dropped SIG by ~0.9 but OVRL by only ~0.4, while clipping distortion dropped OVRL by ~0.7 but SIG by ~0.25 (the model books distortion under background). Clean dubs never fell more than 0.25 below the original (the Perso voices actually scored 0.3–0.4 above the film's recorded dialogue). **Blind spot:** a muffled (low-passed) voice barely changes any score.
+
+**Why not UTMOS:** UTMOS22 (the usual TTS naturalness predictor) was tested first. It rates clean synthetic speech well (3.9) but collapses to ~1.2–1.5 on every real recording, including the originals and voices separated from the music with Demucs, so it can't tell a good dub from a bad one.
+
 ### Speech timing (`speech_intervals`, `timing_alignment`)
 1. Speech stretches come from Whisper word timings, merging gaps shorter than 0.3 s and dropping segments Whisper treats as silence. Word timings follow speech, not the music bed, which defeats energy-based voice detection on this kind of video.
 2. Both tracks go on a 50 ms grid. `overlap_pct` is intersection over union of speaking time. Stretches of ≥ 0.5 s where only one track speaks become `mismatches` (`dub_only` / `original_only`, the 8 longest).
@@ -122,6 +131,7 @@ Every issue becomes a time range `{start, end, dub, category, severity (poor/che
 | `loudness_jump` | loudness envelope: dub vs original level, after removing their overall offset, differs by ≥ 10 dB for ≥ 1 s where both tracks have sound | Poor from 16 dB, else Check |
 | `wrong_language` | Whisper language detection per 10 s window of the dub (`dubbed_language_windows`; windows widen so at most 60 are checked): the original's language at ≥ 50% (the original voice may have been left in), or any other language at ≥ 80% (stricter: Whisper guesses odd languages on noise and music), while the expected one is < 20% | original's language: Poor from 80%; other language: Poor from 95%; else Check |
 | `unclear_speech` | voice clarity: segments Whisper recognised with low confidence | Check |
+| `voice_quality` | voice quality: a ~9 s stretch where the dub scores below the original (SIG ≥ 0.6 or OVRL ≥ 0.5) | Poor from 1.0 / 0.9, else Check |
 
 Rules: ranges of the same category that overlap or are less than 0.5 s apart merge (worst severity kept, `merged` counts them); ranges are clipped to the dub's length, rounded to 0.1 s and sorted by start. A translation issue lasts until the end of the original line starting closest to it (within 1 s; the judge quotes line start times), else the line containing it, else 2 s. Issues the judge flags as probable speech-recognition errors go to `report.possible_asr_errors` and never count. `report.problem_seconds` is the time covered by at least one interval (overlaps count once). Intervals don't change the verdict, which comes from the measure levels; compare mode uses `problem_seconds` as a tie-breaker.
 

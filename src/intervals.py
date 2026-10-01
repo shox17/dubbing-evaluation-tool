@@ -21,6 +21,8 @@ LOUDNESS_MIN_SEC = 1.0               # a level difference must last this long to
 LANG_SOURCE = (0.5, 0.8)             # the original's language heard in the dub: Check from 0.5, Poor from 0.8
 LANG_OTHER = (0.8, 0.95)             # any other language: stricter, because Whisper guesses odd languages on noise
 LANG_EXPECTED_MAX = 0.2              # ...in both cases only while the expected language stays below this
+VOICE_SIG_DROP = (0.6, 1.0)          # dub speech score below the original's in the same window: Check / Poor...
+VOICE_OVRL_DROP = (0.5, 0.9)         # ...or its overall score (clean real dubs: at most 0.25 below)
 LINE_MATCH_SEC = 1.0                 # a translation issue belongs to the original line starting this close to it
 JUDGE_DEFAULT_SEC = 2.0              # length of a translation issue when no transcript line contains it
 
@@ -36,6 +38,7 @@ CATEGORIES = {
     "mistranslation": "r.cat.mistranslation",
     "names_numbers": "r.cat.name_or_number",
     "unclear_speech": "r.cat.clarity",
+    "voice_quality": "r.cat.voice_quality",
 }
 JUDGE_CATEGORY = {"missing": "missing_speech", "added": "added_speech", "mistranslation": "mistranslation",
                   "name_or_number": "names_numbers"}
@@ -134,6 +137,27 @@ def _language_name(code: str) -> str:
     """A readable name for a Whisper language code ("nn" -> "Nynorsk"), or the code itself."""
     from whisper.tokenizer import LANGUAGES
     return LANGUAGES.get(code, code).title()
+
+
+def voice_window_level(w: dict) -> str:
+    """good / check / poor for one voice-quality window: how far the dub falls below the original there."""
+    sig, ovr = w["original_sig"] - w["dub_sig"], w["original"] - w["dub"]
+    if sig >= VOICE_SIG_DROP[1] or ovr >= VOICE_OVRL_DROP[1]:
+        return "poor"
+    if sig >= VOICE_SIG_DROP[0] or ovr >= VOICE_OVRL_DROP[0]:
+        return "check"
+    return "good"
+
+
+def _voice(tr: Tr, vq: Optional[dict]) -> list[dict]:
+    """Windows where the dub's voice sounds clearly worse (robotic, distorted) than the original's."""
+    out = []
+    for w in (vq or {}).get("windows") or [] if (vq or {}).get("measured") else []:
+        level = voice_window_level(w)
+        if level != "good":
+            out.append(_item(tr, w["start"], w["end"], "voice_quality", level, "voice_quality",
+                             tr("r.int.voice_quality", dub=f"{w['dub']:.1f}", orig=f"{w['original']:.1f}")))
+    return out
 
 
 def _clarity(tr: Tr, sr: dict) -> list[dict]:
@@ -244,7 +268,7 @@ def build_intervals(r: dict, tr: Tr, lang: str, clipping_poor: bool = False, dub
     names = {base_lang(k): v for k, v in names.items() if k and v}
     counted, asr = _translation(tr, r.get("translation_judge"), sr, lang)
     counted += _timing(tr, r.get("timing_alignment") or {}) + _distortion(tr, ac, clipping_poor) + _loudness(tr, ac) \
-        + _language(tr, sr, expected, source, names) + _clarity(tr, sr)
+        + _language(tr, sr, expected, source, names) + _clarity(tr, sr) + _voice(tr, r.get("voice_quality"))
     length = video_length(r)
     intervals = merge_intervals(counted, length)
     asr = sorted(({**a, **dict(zip(("start", "end"), _clip(a["start"], a["end"], length)))} for a in asr),

@@ -16,7 +16,7 @@ Works with any language pair, with or without lip-sync, on Windows, macOS and Li
 | Section | What it checks | How |
 |---|---|---|
 | **Timing & audio** | Same length? Same loudness? Unusual gaps? Distortion? Rushed speech? | `librosa` on both tracks: duration, RMS loudness (dB), silence, clipping, chars/words per second |
-| **Speech recognition** | Is the dub in the right language? Is the voice clear? | Whisper language detection, and the share of speech Whisper recognises confidently |
+| **Speech recognition** | Is the dub in the right language? Is the voice clear? Does it sound clean, not robotic or distorted? | Whisper language detection, the share of speech Whisper recognises confidently, and a voice-quality model (DNSMOS P.835) comparing the dub with the original at the same moments |
 | **Timing alignment** | Does the dub speak when the original speaks? | Whisper word timings of both tracks → overlap of speech (IoU) and the places where only one track speaks |
 | **Translation** *(automatic when a key is set)* | Same meaning? Anything missing or added? Names and numbers kept? | Gemini (or Claude) compares the two timestamped transcripts (needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) |
 | **Video integrity** | Is the picture unchanged, with an audio track? | Resolution, frame rate and audio stream of both files |
@@ -154,6 +154,7 @@ Full detail in [METRICS.md](docs/METRICS.md).
 | Speaking pace (Spanish) | ≤ 3.5 words/s | ≤ 4.2 | above |
 | Dub language | matches | unsure | different |
 | Voice clarity | ≥ 90% | ≥ 70% | below |
+| Voice quality (vs the original, per ~9 s stretch) | voice < 0.6 and whole sound < 0.5 below | below that | voice ≥ 1.0 or whole sound ≥ 0.9 below |
 | Speech timing overlap | ≥ 75% | ≥ 55% | below |
 | Meaning (Gemini/Claude, 1–5) | ≥ 4 | 3 | below |
 | Script accuracy | ≥ 80% | ≥ 50% | below |
@@ -190,7 +191,8 @@ src/report.py            Verdict, levels, messages, things to check; text and HT
 src/cli.py               The command-line entry point behind qa.py
 src/jobs.py              Background job runner and progress model (stages, %, stop)
 src/i18n.py              Interface text in English, Korean, Portuguese and Spanish
-src/face_landmarker.task MediaPipe face model used for lip movement
+src/voice_quality.py     Voice quality with the DNSMOS model (ONNX, CPU)
+src/models/              Bundled models (face landmarks, DNSMOS) and their licenses
 tests/                   pytest suite; tests/fake_perso.py fakes the share endpoint. tests/data/sample.mp4 (any ~30 s
                          English talking-head clip) is local test media, not in git; slow tests skip without it
 data/cache/<link>/       Downloaded videos and Whisper results per share link (not committed)
