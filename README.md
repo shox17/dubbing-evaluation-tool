@@ -40,7 +40,7 @@ Every run saves `report.html` (a standalone page to share), `report.json` and `r
 ```
 
 - **Verdict rule:** any Poor → **Poor**; otherwise any Check → **Needs review**; otherwise **Good**. Informational and not-measured items don't count, and are listed with the reason.
-- **Downloads and speech recognition are cached per share link** (`data/cache/`), so a rerun of the same link takes seconds. `--no-cache` redoes everything.
+- **Downloads, speech recognition and the translation review are cached per share link** (`data/cache/`), so a rerun of the same link takes seconds and costs no API call. `--no-cache` redoes the downloads and speech recognition; a failed translation review is never cached.
 - In the app the work runs in a **background thread**, so reloading the page is safe: the job id in the URL reattaches to it.
 - All measuring (Whisper, MediaPipe, audio) happens **on your machine**. Only the translation check sends the two transcripts (text, not audio) to Gemini or Claude.
 
@@ -116,6 +116,19 @@ Still tied → Dub A, and the comparison says it's a tie. A rule is skipped when
 
 **Exit codes:** `0` the recommended dub is Good or Needs review · `1` both dubs are Poor · `2` input or runtime error (invalid link, sharing turned off, …).
 
+### Batch mode: many links, one summary
+```bash
+python qa.py batch links.txt --out ./output/batch --lang en
+```
+`links.txt` has one share link per line (`#` comments and a `url,label` header are fine). Each link gets its own report folder (`001/`, `002/`, …), and the batch writes `summary.csv` (every measure's level and value per link; opens in Excel with Korean intact), `summary.txt` and `summary.json`. A broken link is recorded with its error and the batch goes on (exit code 2 if any failed, else 0).
+
+**Calibrate the tool against your ears:** after each link, add your own verdict, `good`, `check` (or `needs review`) or `poor`:
+```
+https://perso.ai/…?seq=…,good
+https://perso.ai/…?seq=…,poor
+```
+The summary then shows how often the tool agrees with you, whether it is stricter or more lenient, and a person × tool table. Use the CSV to see which measure drove each disagreement before you change a threshold.
+
 ### The command line
 ```bash
 python qa.py "<share link>"                        # text report on screen (Korean by default), files in ./output
@@ -169,6 +182,7 @@ src/perso_api.py         Share links: parse the link, read the public project, d
 src/pipeline.py          Share link → download (cached) → evaluate → translation check → report files; compare mode
 src/compare.py           Compare mode: decision rule, comparison model, text and HTML renderers (pure)
 src/intervals.py         Problem intervals: collect, merge, clip, round, sort (pure)
+src/batch.py             Batch mode: input file, summary rows, agreement with your verdicts (pure)
 src/version.py           Tool version printed in comparisons
 src/evaluate.py          All measurements (pure functions, no file writes)
 src/translation_judge.py Translation check with Gemini (or Claude): retries, model fallback, structured JSON

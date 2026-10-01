@@ -123,6 +123,9 @@ Every issue becomes a time range `{start, end, dub, category, severity (poor/che
 
 Rules: ranges of the same category that overlap or are less than 0.5 s apart merge (worst severity kept, `merged` counts them); ranges are clipped to the dub's length, rounded to 0.1 s and sorted by start. A translation issue lasts until the end of the original line starting closest to it (within 1 s; the judge quotes line start times), else the line containing it, else 2 s. Issues the judge flags as probable speech-recognition errors go to `report.possible_asr_errors` and never count. `report.problem_seconds` is the time covered by at least one interval (overlaps count once). Intervals don't change the verdict, which comes from the measure levels; compare mode uses `problem_seconds` as a tie-breaker.
 
+## 8. Calibrating the bands (`qa.py batch`)
+Every band above is a starting point. To tune them on your own dubs: list share links with your verdict (`link,good|check|poor`), run `python qa.py batch links.txt`, and read the agreement line and the person × tool table. "Stricter than you" means the tool called a dub worse than you did; find which `<measure>_level` columns in `summary.csv` were Poor or Check on those rows, adjust that constant in `report.py` / `intervals.py`, and rerun. Reruns are cached (no downloads, no Whisper, no API calls), so each try takes seconds.
+
 ## Sanity warnings (`warnings` in results)
 Raised automatically when:
 - the duration differs by more than 20% (probably not a matching pair),

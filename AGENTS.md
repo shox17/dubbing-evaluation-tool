@@ -29,6 +29,7 @@ source eval_env/bin/activate                                   # Windows: eval_e
 python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report (Korean by default) + report.* in ./output
 python qa.py "<link>" --out ./output --lang en                 # another folder / language (ko | en | es | pt)
 python qa.py compare "<link A>" "<link B>" --out ./output       # compare two dubs, recommend one
+python qa.py batch links.txt --out ./output/batch                # many links → summary.csv (+ agreement with your labels)
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
@@ -37,7 +38,8 @@ pytest                                                         # ~20 s, adds rea
 Other CLI options (both modes): `--original <file or URL>` (link without an original), `--no-cache`, `--no-lipsync`,
 `--no-translation-check`, `--whisper-model small`, `--verbose` (show MediaPipe logs). Single mode only: `--script "…"`
 / `--script-file f.txt`, `--fail-on poor|check`. Exit codes: 0 done (compare: recommended dub is Good or Needs
-review), 1 single: verdict failed `--fail-on` / compare: both dubs Poor, 2 input or runtime error.
+review), 1 single: verdict failed `--fail-on` / compare: both dubs Poor, 2 input or runtime error (batch: any link
+failed; the summary is still written).
 
 ## Setting up a new machine
 ```bash
@@ -67,6 +69,7 @@ src/translation_judge.py Translation check: Gemini first (REST, retries + model 
 src/report.py            build_report(results, lang): levels, verdict, intervals, things to check; renderers (pure)
 src/intervals.py         Problem intervals: collect from every check, merge (< 0.5 s), clip, round 0.1 s, sort (pure)
 src/compare.py           Compare mode: facts, decide (the rule), build_comparison, text/HTML renderers (pure)
+src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
@@ -138,6 +141,8 @@ output/                  The CLI's default --out folder (git-ignored)
   display, graded)` → add `r.m.<id>`, its messages and its `r.g.<id>` grading sentence to `src/report_text.py`
   in all four languages → add a test in `tests/test_report.py` (use `make_results(...)`) → update
   `docs/METRICS.md`. New result keys need no schema bump; renames/removals do.
+- **Calibrate thresholds:** run `qa.py batch` on labelled links (`link,good|check|poor`), read the agreement and
+  `summary.csv` (every measure's level and value), change the constant, rerun (cached: seconds, no API calls).
 - **Change a threshold:** edit the constant at the top of `src/report.py` (or `src/intervals.py` for intervals);
   the grading sentences read it. Update the bands in `docs/METRICS.md` and `README.md`.
 - **Add a pace rule for a language:** add `"<code>": (good, check)` to `SPEECH_RATE` in `src/report.py` (chars/s for
