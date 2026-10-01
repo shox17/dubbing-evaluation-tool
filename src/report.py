@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from src.evaluate import base_lang, whisper_language
 from src.i18n import DEFAULT_UI_LANGUAGE, t as i18n_t
-from src.intervals import build_intervals, local_text as _local
+from src.intervals import VOICE_OVRL_DROP, VOICE_SIG_DROP, build_intervals, local_text as _local, voice_window_level
 
 # Thresholds, in one place so the report can print exactly what it applied.
 LENGTH_PCT = (5.0, 15.0)                 # |dub - original| / original
@@ -27,6 +27,8 @@ LANGUAGE_PROB = 0.5                      # below this the language guess is unce
 OVERLAP_PCT = (75.0, 55.0)               # speech-timing overlap; a real Perso EN→KO dub scores ~81%
 SCRIPT_PCT = (80.0, 50.0)                # accuracy against a script
 MEANING_SCORE = (4, 3)                   # LLM judge, 1-5
+VOICE_FLOOR = 1.6                        # voice quality: an original scoring below this (1-5) is too noisy to compare
+# Voice-quality window bands (how far the dub may fall below the original) are in src/intervals.py.
 
 LEVELS = ("good", "check", "poor")
 ICONS = {"good": "✅", "check": "⚠️", "poor": "❌", "info": "ℹ️", "not_measured": "·"}
@@ -133,7 +135,27 @@ def _pace(tr: Tr, rate: Optional[dict], lang: str, lang_name: str) -> dict:
                    tr("r.g.pace", good=f"{bands[0]:g}", check=f"{bands[1]:g}", unit=unit))
 
 
-def _speech(tr: Tr, sr: dict, lang: str, lang_name: str) -> list[dict]:
+def _voice(tr: Tr, vq: Optional[dict]) -> dict:
+    """Voice quality of the dub against the original at the same moments (DNSMOS SIG)."""
+    if not vq:
+        return _na(tr, "voice_quality", tr("r.vq.old"))
+    if not vq.get("measured"):
+        return _na(tr, "voice_quality", tr(vq.get("reason_key") or "r.vq.error"))
+    dub, orig, diff = vq["dub"], vq["original"], vq["difference"]
+    if orig < VOICE_FLOOR:
+        return _na(tr, "voice_quality", tr("r.vq.too_noisy", orig=f"{orig:.1f}"))
+    levels = [voice_window_level(w) for w in vq["windows"]]
+    level = "poor" if "poor" in levels else "check" if "check" in levels else "good"
+    flagged = sum(1 for lv in levels if lv != "good")
+    shown = f"{dub:.1f} / {orig:.1f}" + (f" · {flagged}/{len(levels)}" if flagged else "")
+    msg = tr("r.vq.good", dub=f"{dub:.1f}", orig=f"{orig:.1f}") if level == "good" else \
+        _pl(tr, f"r.vq.{level}", flagged, total=len(levels))
+    return _metric(tr, "voice_quality", level, msg, diff, shown,
+                   tr("r.g.vq", sig=f"{VOICE_SIG_DROP[0]:g}", ovr=f"{VOICE_OVRL_DROP[0]:g}",
+                      sig_poor=f"{VOICE_SIG_DROP[1]:g}", ovr_poor=f"{VOICE_OVRL_DROP[1]:g}"))
+
+
+def _speech(tr: Tr, sr: dict, lang: str, lang_name: str, vq: Optional[dict] = None) -> list[dict]:
     """Right language, how clearly the voice is recognised, and script accuracy when a script exists."""
     rows = []
     expected = whisper_language(lang)
@@ -164,6 +186,7 @@ def _speech(tr: Tr, sr: dict, lang: str, lang_name: str) -> list[dict]:
         rows.append(_metric(tr, "clarity", level, msg, pct, tr("r.clarity.display", pct=f"{pct:.0f}%"),
                             tr("r.g.clarity", good=f"{CLARITY_PCT[0]:g}", check=f"{CLARITY_PCT[1]:g}")))
 
+    rows.append(_voice(tr, vq))
     if sr.get("accuracy_pct") is not None:
         acc = sr["accuracy_pct"]
         rows.append(_metric(tr, "script_accuracy", _band_min(acc, SCRIPT_PCT), tr("r.script", acc=f"{acc:.0f}%"),
@@ -316,7 +339,7 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE, dub: Optional[str] = 
         project["evaluated_video"] = tr("r.evaluated." + ("lipsync" if project["is_lipsync"] else "dub"))
     sections = [
         {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code, lang_name)},
-        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name)},
+        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name, r.get("voice_quality"))},
         {"id": "alignment", "metrics": _alignment(tr, r.get("timing_alignment") or {})},
         {"id": "translation", "metrics": _translation(tr, tj, lang), "note": tr("r.note.translation")},
         {"id": "integrity", "metrics": _integrity(tr, r.get("video_integrity"))},

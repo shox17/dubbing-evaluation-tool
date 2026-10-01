@@ -425,6 +425,9 @@ MESSAGES = {
                                           "es": "Descargando el video original..."},
     "Checking which language the dub is in...": {"ko": "더빙 언어 확인 중...", "pt": "Verificando o idioma da dublagem...",
                                                  "es": "Comprobando el idioma del doblaje..."},
+    "Rating the voice quality of both tracks...": {"ko": "두 트랙의 목소리 품질 평가 중...",
+                                                   "pt": "Avaliando a qualidade da voz das duas faixas...",
+                                                   "es": "Calificando la calidad de la voz de ambas pistas..."},
     "Comparing the two dubs...": {"ko": "두 더빙 비교 중...", "pt": "Comparando as duas dublagens...",
                                   "es": "Comparando los dos doblajes..."},
     "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {

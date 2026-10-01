@@ -42,6 +42,9 @@ Share links only; no API key, no account (https://developers.perso.ai/llms.txt).
 ### `src/evaluate.py`
 Pure: no file writes (only temp audio) and no side effects on import. `run_full_evaluation` reports sub-steps through `on_step`, takes `include_lipsync` (skip the slow experimental step), `source_lang`, and an optional dict-like `cache` for Whisper results (transcripts, language detection, language windows) keyed by model, language and media file; the Whisper model is loaded only on a cache miss. On Windows, OpenCV gets an ASCII path (`_cv2_path`) and MediaPipe gets its model as bytes, because both fail on non-ASCII paths. It returns audio measures, both transcripts with Whisper segments, the dub's detected language, clarity, speech intervals and their alignment, clipping, a technical comparison of both files, and lip movement. See [METRICS.md](METRICS.md).
 
+### `src/voice_quality.py`
+`voice_quality(y_orig, y_dub, orig_speech, dub_speech)` scores ~9 s windows where both tracks speak with DNSMOS P.835 (`src/models/dnsmos_sig_bak_ovr.onnx`, onnxruntime on CPU, session loaded once) and returns `{measured, reason_key, dub, original, difference, windows[{start, end, dub, original, dub_sig, original_sig, dub_bak, original_bak}], model}`. `evaluate.run_full_evaluation` calls it through the per-link cache; a missing runtime becomes `not_measured("r.vq.error")`. Grading: `intervals.voice_window_level`, used by both the report row and the intervals.
+
 ### `src/translation_judge.py`
 One LLM review of both timestamped transcripts: a 1–5 meaning score, a summary, and issues typed `missing / added / mistranslation / name_or_number` with severity, time, exact quotes and `may_be_recognition_error`.
 - **Provider:** Gemini when `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set, else Claude when `ANTHROPIC_API_KEY` is available (`judge_provider()`).
@@ -84,6 +87,7 @@ Pure. `parse_batch_file` reads one link per line with an optional person's verdi
 - `acoustic_metrics`: durations, speaking time, RMS and ratio, volume stability, silence, `original_peak_dbfs`, `dubbed_peak_dbfs`, `dubbed_clipping_pct`, `dubbed_clipping_intervals[[start, end]]`, `loudness_envelope {step_sec, original_db[], dubbed_db[]}`.
 - `speech_recognition`: script scores (`wer`, `cer`, `primary_metric`, `error_rate`, `accuracy_pct`; `null` unless the CLI got `--script`), `ground_truth`, both transcripts, both speech rates, `dubbed_language_detected`, `dubbed_language_probability`, `dubbed_language_windows[{start, end, language, probability, expected_probability}]`, `clarity {confident_pct, mean_logprob, segments, unclear_segments[]}`, `original_segments[]`, `dubbed_segments[]`.
 - `timing_alignment`: `overlap_pct`, `original_covered_pct`, `dub_in_original_pct`, `start_offset_sec`, `end_offset_sec`, `mismatches[{start, end, kind}]`, `original_speech[]`, `dubbed_speech[]`.
+- `voice_quality`: see `src/voice_quality.py` above.
 - `video_integrity`: `original` / `dubbed` `{readable, width, height, fps, frames, duration_sec, has_audio}`, `same_resolution`, `same_fps`.
 - `lipsync_metrics`: `measured`, `valid`, `reason`, zero-lag and best-lag correlation, face coverage, the original's values, waveforms.
 - `translation_judge`: `{measured, reason, model, meaning_score, summary, issues[]}`.

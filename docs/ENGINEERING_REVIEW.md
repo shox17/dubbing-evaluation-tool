@@ -8,6 +8,11 @@ _Initial review 2026-09-25. Updated 2026-09-29: the tool evaluates a dub from it
 - **Translation check (automatic):** Gemini (or Claude) compares both timestamped transcripts for meaning, missing or added content, names and numbers, and mistranslations. Issues the model flags as probable speech-recognition errors are listed but don't change levels. Without a key it's reported as not measured; it never fails the run.
 - **Report:** a verdict (Good / Needs review / Poor) with a one-line summary, six sections where every measure has a level, a plain explanation and the thresholds used, timestamped things to check (▶ jumps both videos there in the app), and a not-measured list with reasons. Saved as `report.html` (standalone, shareable), `report.json` and `report.txt` in every run folder.
 
+## Voice quality (2026-10-01)
+- New measure **Voice quality** (DNSMOS P.835, bundled 1.1 MB ONNX model, onnxruntime, ~4 s per 60 s dub on CPU): the dub is scored against the original at the same moments where both speak, per ~9 s stretch, on speech (SIG) and overall (OVRL); the worst stretch sets the level and flagged stretches become intervals.
+- **Validated by simulated damage** on two real EN→ES dubs (20 s of each dub degraded): robotic quantisation and clipping distortion are flagged in the right place; clean dubs stay ≥ 0.35 inside the bands. Muffling is not detected (documented blind spot).
+- **Rejected UTMOS** after testing: correct on clean synthetic speech (3.9) but ~1.2–1.5 on every real recording, also after Demucs voice separation. Lesson recorded in AGENTS.md: test any speech model on real Perso dubs before shipping it.
+
 ## Accuracy (2026-10-01)
 - **Repeatable results.** Whisper falls back to random sampling when unsure, so the same dub gave different transcripts and scores run to run (a real dub's speech timing read 49% in one run and 56% in another). `transcribe` now seeds that sampling inside the call (`WHISPER_SEED`); two uncached runs on two real dubs now match exactly. Cached Whisper results carry `CACHE_VERSION` so older unseeded ones are recomputed.
 - **Translation check cached** per link (fingerprint of transcripts, languages, provider, models, prompt, schema); failures are retried.

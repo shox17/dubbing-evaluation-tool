@@ -23,6 +23,7 @@ REPORT_TEXT = {
     "r.m.meaning": {"en": "Meaning preserved", "ko": "의미 보존", "pt": "Sentido preservado", "es": "Sentido conservado"},
     "r.m.completeness": {"en": "Missing or added content", "ko": "누락·추가된 내용", "pt": "Conteúdo faltando ou a mais",
                          "es": "Contenido que falta o sobra"},
+    "r.m.voice_quality": {"en": "Voice quality", "ko": "목소리 품질", "pt": "Qualidade da voz", "es": "Calidad de la voz"},
     "r.m.names_numbers": {"en": "Names and numbers", "ko": "이름과 숫자", "pt": "Nomes e números", "es": "Nombres y números"},
     "r.m.mistranslations": {"en": "Mistranslations", "ko": "오역", "pt": "Erros de tradução", "es": "Errores de traducción"},
     "r.m.file_check": {"en": "Video file", "ko": "영상 파일", "pt": "Arquivo de vídeo", "es": "Archivo de video"},
@@ -685,6 +686,114 @@ REPORT_TEXT = {
         "ko": "더빙의 이 부분을 알아듣기 어렵습니다: “{text}”. 목소리가 또렷한지 들어 보세요.",
         "pt": "Este trecho da dublagem é difícil de entender: “{text}”. Ouça para ver se a voz está clara.",
         "es": "Esta parte del doblaje se entiende mal: “{text}”. Escucha para comprobar que la voz es clara.",
+    },
+    "r.cat.voice_quality": {"en": "voice quality", "ko": "목소리 품질", "pt": "qualidade da voz", "es": "calidad de la voz"},
+    "r.int.voice_quality": {
+        "en": "Around here the dub's voice sounds clearly worse than the original's (score {dub} against {orig}): "
+              "listen for a robotic, distorted or muffled voice.",
+        "ko": "이 부근에서 더빙 목소리가 원본보다 확실히 나쁘게 들립니다(점수 {dub}, 원본 {orig}). 기계음, 찌그러짐, "
+              "먹먹한 소리가 나는지 들어 보세요.",
+        "pt": "Por aqui a voz da dublagem soa claramente pior que a do original (nota {dub} contra {orig}): ouça se a voz "
+              "está robótica, distorcida ou abafada.",
+        "es": "Por aquí la voz del doblaje suena claramente peor que la del original (nota {dub} frente a {orig}): "
+              "escucha si suena robótica, distorsionada o apagada.",
+    },
+    "r.vq.good": {
+        "en": "The dub's voice sounds as clean as the original's where both speak (score {dub} against {orig} on a 1-5 "
+              "scale). No robotic or distorted sound stands out.",
+        "ko": "두 트랙이 함께 말하는 구간에서 더빙 목소리가 원본만큼 깨끗하게 들립니다(1~5점 중 더빙 {dub}, 원본 {orig}). "
+              "기계음이나 찌그러짐이 눈에 띄지 않습니다.",
+        "pt": "A voz da dublagem soa tão limpa quanto a do original onde os dois falam (nota {dub} contra {orig}, de 1 a "
+              "5). Nenhum som robótico ou distorcido se destaca.",
+        "es": "La voz del doblaje suena tan limpia como la del original donde hablan los dos (nota {dub} frente a "
+              "{orig}, de 1 a 5). No destaca ningún sonido robótico ni distorsionado.",
+    },
+    "r.vq.check_one": {
+        "en": "In {n} of {total} stretches the dub's voice sounds a little worse than the original's at the same moment. "
+              "Listen there for a slightly robotic or distorted voice.",
+        "ko": "{total}개 구간 중 {n}개에서 더빙 목소리가 같은 순간의 원본보다 조금 나쁘게 들립니다. 그 부분이 약간 "
+              "기계적이거나 찌그러지게 들리는지 확인하세요.",
+        "pt": "Em {n} de {total} trechos a voz da dublagem soa um pouco pior que a do original no mesmo momento. Ouça "
+              "ali se a voz está um pouco robótica ou distorcida.",
+        "es": "En {n} de {total} tramos la voz del doblaje suena algo peor que la del original en el mismo momento. "
+              "Escucha ahí si suena algo robótica o distorsionada.",
+    },
+    "r.vq.check_many": {
+        "en": "In {n} of {total} stretches the dub's voice sounds a little worse than the original's at the same "
+              "moment. Listen there for a slightly robotic or distorted voice.",
+        "ko": "{total}개 구간 중 {n}개에서 더빙 목소리가 같은 순간의 원본보다 조금 나쁘게 들립니다. 그 부분들이 약간 "
+              "기계적이거나 찌그러지게 들리는지 확인하세요.",
+        "pt": "Em {n} de {total} trechos a voz da dublagem soa um pouco pior que a do original no mesmo momento. Ouça "
+              "ali se a voz está um pouco robótica ou distorcida.",
+        "es": "En {n} de {total} tramos la voz del doblaje suena algo peor que la del original en el mismo momento. "
+              "Escucha ahí si suena algo robótica o distorsionada.",
+    },
+    "r.vq.poor_one": {
+        "en": "In {n} of {total} stretches the dub's voice sounds clearly worse than the original's: viewers will likely "
+              "hear a robotic or distorted voice there. Check the voice settings or regenerate that part.",
+        "ko": "{total}개 구간 중 {n}개에서 더빙 목소리가 원본보다 확실히 나쁘게 들려 시청자가 기계음이나 찌그러진 소리를 "
+              "들을 가능성이 높습니다. 음성 설정을 확인하거나 그 부분을 다시 생성하세요.",
+        "pt": "Em {n} de {total} trechos a voz da dublagem soa claramente pior que a do original: o público "
+              "provavelmente ouvirá uma voz robótica ou distorcida ali. Revise a voz ou gere essa parte de novo.",
+        "es": "En {n} de {total} tramos la voz del doblaje suena claramente peor que la del original: es probable que "
+              "el público oiga ahí una voz robótica o distorsionada. Revisa la voz o vuelve a generar esa parte.",
+    },
+    "r.vq.poor_many": {
+        "en": "In {n} of {total} stretches the dub's voice sounds clearly worse than the original's: viewers will likely "
+              "hear a robotic or distorted voice there. Check the voice settings or regenerate those parts.",
+        "ko": "{total}개 구간 중 {n}개에서 더빙 목소리가 원본보다 확실히 나쁘게 들려 시청자가 기계음이나 찌그러진 소리를 "
+              "들을 가능성이 높습니다. 음성 설정을 확인하거나 그 부분들을 다시 생성하세요.",
+        "pt": "Em {n} de {total} trechos a voz da dublagem soa claramente pior que a do original: o público "
+              "provavelmente ouvirá uma voz robótica ou distorcida ali. Revise a voz ou gere essas partes de novo.",
+        "es": "En {n} de {total} tramos la voz del doblaje suena claramente peor que la del original: es probable que "
+              "el público oiga ahí una voz robótica o distorsionada. Revisa la voz o vuelve a generar esas partes.",
+    },
+    "r.g.vq": {
+        "en": "A voice-quality model trained on listener scores rates both tracks at the same moments (about 9 s each), "
+              "where both speak, on a 1-5 scale for the voice and for the whole sound. A stretch is Check when the "
+              "dub's voice scores {sig} or more below the original's or the whole sound {ovr} or more below, Poor from "
+              "{sig_poor} / {ovr_poor}. The worst stretch sets the level. A muffled voice is not detected.",
+        "ko": "청취자 평가로 학습한 목소리 품질 모델이 두 트랙이 함께 말하는 같은 순간(약 9초씩)을 목소리와 전체 소리에 "
+              "대해 1~5점으로 평가합니다. 더빙 목소리 점수가 원본보다 {sig}점 이상 또는 전체 소리 점수가 {ovr}점 이상 "
+              "낮으면 확인 필요, {sig_poor} / {ovr_poor}점 이상이면 미흡입니다. 가장 나쁜 구간이 등급을 정합니다. "
+              "먹먹한 목소리는 감지하지 못합니다.",
+        "pt": "Um modelo de qualidade de voz treinado com notas de ouvintes avalia as duas faixas nos mesmos momentos "
+              "(cerca de 9 s cada), onde as duas falam, de 1 a 5 para a voz e para o som todo. Um trecho é Verificar "
+              "quando a voz da dublagem fica {sig} ou mais abaixo da original ou o som todo {ovr} ou mais abaixo, Ruim "
+              "a partir de {sig_poor} / {ovr_poor}. O pior trecho define o nível. Uma voz abafada não é detectada.",
+        "es": "Un modelo de calidad de voz entrenado con notas de oyentes califica las dos pistas en los mismos momentos "
+              "(unos 9 s cada uno), donde hablan las dos, de 1 a 5 para la voz y para todo el sonido. Un tramo es "
+              "Revisar cuando la voz del doblaje queda {sig} o más por debajo de la original o todo el sonido {ovr} o "
+              "más, Deficiente desde {sig_poor} / {ovr_poor}. El peor tramo fija el nivel. Una voz apagada no se "
+              "detecta.",
+    },
+    "r.vq.no_common_speech": {
+        "en": "The original and the dub don't speak at the same time long enough to compare their voices.",
+        "ko": "원본과 더빙이 동시에 말하는 시간이 짧아 목소리를 비교할 수 없습니다.",
+        "pt": "O original e a dublagem não falam ao mesmo tempo por tempo suficiente para comparar as vozes.",
+        "es": "El original y el doblaje no hablan a la vez el tiempo suficiente para comparar sus voces.",
+    },
+    "r.vq.too_noisy": {
+        "en": "The original's voice itself scores low ({orig} of 5, usually because of loud music or noise), so it "
+              "can't serve as a reference for the dub's voice quality.",
+        "ko": "원본 목소리 점수 자체가 낮아(5점 중 {orig}, 보통 큰 음악이나 소음 때문) 더빙 목소리 품질의 기준으로 쓸 수 "
+              "없습니다.",
+        "pt": "A própria voz do original tem nota baixa ({orig} de 5, em geral por música alta ou ruído), então não serve "
+              "de referência para a qualidade da voz da dublagem.",
+        "es": "La propia voz del original tiene nota baja ({orig} de 5, normalmente por música fuerte o ruido), así que "
+              "no sirve de referencia para la calidad de la voz del doblaje.",
+    },
+    "r.vq.error": {
+        "en": "The voice-quality model couldn't run on this machine, so voice quality wasn't measured.",
+        "ko": "이 컴퓨터에서 목소리 품질 모델을 실행하지 못해 목소리 품질을 측정하지 않았습니다.",
+        "pt": "O modelo de qualidade de voz não pôde rodar nesta máquina, então a qualidade da voz não foi medida.",
+        "es": "El modelo de calidad de voz no pudo ejecutarse en este equipo, así que no se midió la calidad de la voz.",
+    },
+    "r.vq.old": {
+        "en": "This result was made before voice quality was measured. Run the evaluation again to get it.",
+        "ko": "목소리 품질 측정이 추가되기 전에 만든 결과입니다. 다시 평가하면 볼 수 있습니다.",
+        "pt": "Este resultado foi gerado antes da medição da qualidade da voz. Avalie de novo para obtê-la.",
+        "es": "Este resultado se hizo antes de que se midiera la calidad de la voz. Vuelve a evaluar para obtenerla.",
     },
     "r.int.long_silence": {
         "en": "The original speaks for {sec} s here, but the dub is silent. A line is probably missing from the dub.",

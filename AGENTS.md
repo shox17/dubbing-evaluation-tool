@@ -10,7 +10,7 @@ deliver, with the reason.
 
 1. The share link's public endpoint (no key, no account, no credits) gives the original video and the dub.
 2. The tool downloads both (the lip-synced dub when there is one), then measures them: length, loudness, silence,
-   distortion, speaking pace, dub language, voice clarity (Whisper), speech timing, video file, lip movement
+   distortion, speaking pace, dub language, voice clarity (Whisper), voice quality (DNSMOS), speech timing, video file, lip movement
    (experimental, lip-synced dubs only), and script accuracy when a script is passed to the CLI.
 3. Gemini (or Claude) checks the translation automatically when a key is set.
 4. `src/report.py` turns everything into a report: a verdict (Good / Needs review / Poor), every measure with a
@@ -49,7 +49,7 @@ printf 'GEMINI_API_KEY=%s\n' "<key>" > .env  # optional: turns on the translatio
 pytest -m "not slow"
 ```
 - If `pip install` fails on another Python version, install unpinned:
-  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests anthropic pytest`.
+  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests onnxruntime anthropic pytest`.
 - The first evaluation downloads the Whisper `base` model (~145 MB) to `~/.cache/whisper`. Run one evaluation
   before a demo so the download is done.
 - `.env` is git-ignored; a fresh clone has none. Without a key everything works except the translation check,
@@ -70,12 +70,14 @@ src/report.py            build_report(results, lang): levels, verdict, intervals
 src/intervals.py         Problem intervals: collect from every check, merge (< 0.5 s), clip, round 0.1 s, sort (pure)
 src/compare.py           Compare mode: facts, decide (the rule), build_comparison, text/HTML renderers (pure)
 src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
+src/voice_quality.py     Voice quality: DNSMOS P.835 on both tracks at the same moments, where both speak (ONNX)
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
 src/jobs.py              Background job thread + Progress model (stages fetch/download/evaluate, stop, reattach)
 src/cli.py               Argument parsing, quiet native logs, exit codes
-src/face_landmarker.task MediaPipe face model (lip movement)
+src/models/              Bundled models with their licenses (README.md there): MediaPipe face landmarker (lip
+                         movement), DNSMOS P.835 ONNX (voice quality)
 tests/fake_perso.py      Fake share endpoint + media host, with a real response shape
 tests/sample_results.py  A realistic results dict (make_results) for report/CLI/UI tests
 tests/data/sample.mp4    Local only (git-ignored): any ~30 s English talking-head MP4; the 2 slow tests skip without it
@@ -113,6 +115,10 @@ output/                  The CLI's default --out folder (git-ignored)
 - Verdict rule: any Poor → Poor; otherwise any Check → Needs review; otherwise Good. Info and not-measured rows
   never count. Issues the judge flags `may_be_recognition_error` are listed but never lower a level.
 - The pipeline reports progress only through `Progress` objects; the background thread must never call `st.*`.
+- **Voice quality compares the dub with the original at the same moments**, never in absolute terms: DNSMOS scores
+  fall with background music, which both tracks share. It was chosen after UTMOS failed on real dubs (every real
+  recording scored ~1.2-1.5, even after voice separation); don't swap in a studio-speech model without testing it on
+  real Perso dubs. Window bands are in `src/intervals.py` (`VOICE_SIG_DROP`, `VOICE_OVRL_DROP`).
 - Lip movement is measured automatically only when the dub is lip-synced, is always informational and never
   changes the verdict. Don't present its number as reliable (METRICS.md §3).
 - The app has no options or settings: lip movement and the translation check are automatic, the Whisper model
@@ -179,6 +185,8 @@ output/                  The CLI's default --out folder (git-ignored)
 - Whisper is seeded inside `transcribe` so results are repeatable; keep it that way (bump `CACHE_VERSION` in
   `src/evaluate.py` when cached Whisper results would change).
 - The job registry is in memory; restarting the app during a run loses tracking.
+- Voice quality misses a muffled (low-passed) voice, and its bands were set from damage simulated on two real dubs
+  (clean dubs: at most 0.25 below the original; robotic/distorted stretches: 0.4-2.3 below).
 - Interval thresholds (long silence 2/4 s, loudness jump 10/16 dB, wrong language: original's 50/80%, other 80/95%) are first guesses checked on
   the sample only. The per-window language check needs ~3 s of speech per 10 s window.
 - Compare mode was verified with fake share links (real Whisper), in the browser, and on two real EN→ES Perso dubs of
