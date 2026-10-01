@@ -28,7 +28,7 @@ from src.report import render_text
 log = logging.getLogger(__name__)
 FAIL_LEVELS = {"never": (), "poor": ("poor",), "check": ("check", "poor")}
 LANGS = ["ko", "en", "es", "pt"]
-DEFAULT_OUT = "output"
+DEFAULT_OUT = os.getenv("DUBBING_QA_OUT") or "output"      # the Docker image sets /data/output (on the volume)
 
 
 def _common(ap: argparse.ArgumentParser) -> None:

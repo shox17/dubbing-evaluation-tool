@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from src.batch import agreement, render_batch_text, summary_row, to_csv
 from src import history
+from src.paths import DATA_DIR
 from src.compare import LABELS, build_ranking, render_comparison_html, render_comparison_text
 from src.evaluate import run_full_evaluation, DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
@@ -31,10 +32,10 @@ log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-OUTPUT_DIR = PROJECT_ROOT / "data" / "output"
+OUTPUT_DIR = DATA_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
 RESULTS_FILE = OUTPUT_DIR / "results.json"
-CACHE_DIR = PROJECT_ROOT / "data" / "cache"
+CACHE_DIR = DATA_DIR / "cache"
 MAX_KEPT_RUNS = int(os.getenv("MAX_KEPT_RUNS", "10"))
 MAX_CACHED_LINKS = int(os.getenv("MAX_CACHED_LINKS", "20"))
 

@@ -73,13 +73,19 @@ Pure. `parse_batch_file` reads one link per line with an optional person's verdi
 ### `src/feedback.py`
 `vote(project, interval, verdict)` appends `{time, key, link, seq, category, check, severity, start, end, vote, reviewer}` to `data/feedback.jsonl` (`DUBBING_QA_FEEDBACK` overrides); `interval_key` = Perso project | category | start | end, and `latest()` keeps the newest vote per key. `summarize(votes)` gives totals and, per check, confirmed / false-alarm counts, the confirmed share and a status (`few` under 3 votes, `noisy` at ≥ 50% false alarms, else `reliable`). Report things-to-check items carry their `interval`, which the app's 👍/👎 buttons vote on.
 
+### `src/api.py`
+FastAPI app: `POST /evaluations`, `POST /comparisons` (validate links, then `jobs.start_job` with `run_share_evaluation` / `run_comparison` into a new run folder; 202 with the job url), `GET /jobs/{id}` (status, progress, elapsed, error; when done a result summary and report links), `GET /jobs/{id}/report?format=` (409 while running, 410 if pruned), `GET /history`, `GET /feedback`, `GET /health`. `require_token` checks `Authorization: Bearer` with `hmac.compare_digest` when `DUBBING_QA_API_TOKEN` is set; `serve()` refuses non-local hosts without it.
+
+### `src/paths.py`
+`DATA_DIR`: the project's `data/` or `DUBBING_QA_DATA`. Output runs, the per-link cache, history, votes and jobs all live under it (each still overridable by its own variable).
+
 ### `src/cli.py` / `qa.py`
 `python qa.py "<share link>" [--out DIR] [--lang ko|en|es|pt] [--original FILE_OR_URL] [--script/--script-file] [--no-lipsync] [--no-translation-check] [--no-cache] [--whisper-model] [--json] [--fail-on never|poor|check] [--verbose]` and `python qa.py compare <A> <B>` with the same options (no script / fail-on). `--out` defaults to `./output` and is created if missing; `--lang` defaults to `ko`. stdout/stderr are switched to UTF-8. Progress on stderr, report on stdout; MediaPipe's native logs are silenced unless `--verbose`. Exit codes: single 0 done / 1 verdict failed `--fail-on`; compare 0 recommended dub Good or Needs review / 1 both Poor; both 2 input or runtime error.
 
 ### `src/jobs.py`
 - `start_job(runner, params, stages)` runs `runner(report, cancel_event)` in a daemon thread. Jobs live in a process-wide registry, so a page reload (`?job=<id>`) reattaches to them. `Cancelled` marks a stopped job.
 - `Job.overall_fraction` weights stages by typical duration (fetch 0.2, download 1, evaluate 6; compare: dub_a 7, dub_b 7, compare 0.2). `stage_state()` drives the done / active / pending / failed checklist.
-- **Limitation:** the registry is in memory; restarting the app server loses tracking of a running evaluation.
+- Jobs write `data/jobs/<id>.json` (state; on stage changes and every 2 s) and `<id>.result.json` (when done); `get_job` falls back to them, so finished jobs survive restarts and jobs that were running come back as `interrupted`. A final state is written to disk before it is set in memory. The newest 50 jobs are kept.
 
 ### `src/i18n.py`
 - `TEXT` holds every interface string in `en`, `ko`, `pt` (Brazil) and `es`, plus every report and comparison sentence from `report_text.py` (`r.*`, `c.*`). `app.py` reads it through `t(key, **values)` with the language picked in the sidebar (default: the browser locale).

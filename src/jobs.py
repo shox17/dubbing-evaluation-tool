@@ -13,12 +13,14 @@ import uuid
 import logging
 import threading
 from pathlib import Path
+
+from src.paths import DATA_DIR
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
 
-JOBS_DIR = Path(os.getenv("DUBBING_QA_JOBS", Path(__file__).resolve().parent.parent / "data" / "jobs"))
+JOBS_DIR = Path(os.getenv("DUBBING_QA_JOBS") or DATA_DIR / "jobs")
 MAX_KEPT_JOBS = 50
 SAVE_EVERY_SEC = 2.0                 # progress snapshots are written at most this often (stage changes always)
 JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")

@@ -1,0 +1,20 @@
+# docker compose up            → the app on http://localhost:8501
+# docker compose --profile api up   → also the REST API on http://localhost:8000 (set DUBBING_QA_API_TOKEN in .env)
+services:
+  app:
+    build: .
+    image: dubbing-qa
+    ports: ["8501:8501"]
+    env_file: [{path: .env, required: false}]
+    volumes: [dubbing-qa-data:/data]
+  api:
+    image: dubbing-qa
+    profiles: [api]
+    command: ["python", "qa.py", "serve", "--host", "0.0.0.0"]
+    ports: ["8000:8000"]
+    env_file: [{path: .env, required: false}]
+    volumes: [dubbing-qa-data:/data]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+volumes:
+  dubbing-qa-data:
