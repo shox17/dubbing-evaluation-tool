@@ -4,7 +4,7 @@ Pages, picked by the router at the bottom: setup (paste one Perso share link, or
 background job is running), results (one dub's report) and comparison (two dubs side by side with a
 recommendation). All fetching, measuring, deciding and report building happens in src/; this file only shows it.
 """
-import os
+from pathlib import Path
 import html
 import json
 import math
@@ -296,11 +296,11 @@ def render_results(r: dict):
     start = st.session_state.get("seek", 0)
     with v1.container(border=True):
         st.markdown(f"**{t('results.original')}**")
-        if os.path.exists(p.get("input_video_path", "")):
+        if Path(p.get("input_video_path") or "").is_file():
             st.video(p["input_video_path"], start_time=start)
     with v2.container(border=True):
         st.markdown(f"**{t('results.dubbed')}** :blue-badge[{p.get('target_language_name')}]")
-        if os.path.exists(p.get("dubbed_video_path", "")):
+        if Path(p.get("dubbed_video_path") or "").is_file():
             st.video(p["dubbed_video_path"], start_time=start)
         else:
             st.warning(t("results.video_gone"), icon=":material/videocam_off:")
@@ -529,7 +529,7 @@ def render_comparison(run: dict):
             p = res[dub].get("pipeline", {})
             verdict = comp["facts"][dub]["verdict"]
             st.markdown(f"**{lb['dub_' + dub]}** {badge(verdict)}  \n:gray[{html.escape(comp['links'][dub]['title'] or '')}]")
-            if os.path.exists(p.get("dubbed_video_path", "")):
+            if Path(p.get("dubbed_video_path") or "").is_file():
                 st.video(p["dubbed_video_path"], start_time=st.session_state.get(f"seek_{dub}", 0))
             st.caption(lb[f"count_{dub}"])
             for n, i in enumerate(comp["intervals"][dub]):

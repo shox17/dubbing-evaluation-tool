@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import unicodedata
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -23,8 +24,8 @@ import imageio_ffmpeg
 
 log = logging.getLogger(__name__)
 
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-FACE_MODEL_PATH = os.path.join(SRC_DIR, "face_landmarker.task")
+SRC_DIR = Path(__file__).resolve().parent
+FACE_MODEL_PATH = str(SRC_DIR / "face_landmarker.task")
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 SAMPLE_RATE = 16000
 
@@ -76,7 +77,7 @@ def get_whisper_model(model_name: str = DEFAULT_WHISPER_MODEL):
 
 def extract_audio(video_path: str, output_audio_path: str, sample_rate: int = SAMPLE_RATE) -> str:
     """Extracts 16kHz mono PCM WAV audio using the bundled ffmpeg binary."""
-    os.makedirs(os.path.dirname(os.path.abspath(output_audio_path)), exist_ok=True)
+    Path(output_audio_path).resolve().parent.mkdir(parents=True, exist_ok=True)
     command = [
         FFMPEG_EXE, "-nostdin", "-y",
         "-i", video_path,
@@ -329,11 +330,33 @@ def timing_alignment(original: list[list[float]], dubbed: list[list[float]], dur
     }
 
 
+def _cv2_path(path: str) -> str:
+    """A path OpenCV can open. On Windows OpenCV can't open non-ASCII paths (e.g. a Korean user name), so it
+    gets a relative or 8.3 short path instead when that is plain ASCII."""
+    if os.name != "nt" or path.isascii():
+        return path
+    try:
+        rel = os.path.relpath(path)
+        if rel.isascii():
+            return rel
+    except ValueError:                        # on another drive
+        pass
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf)) and buf.value.isascii():
+            return buf.value
+    except (AttributeError, OSError):
+        pass
+    log.warning("OpenCV may not open this non-ASCII path on Windows: %s", path)
+    return path
+
+
 def probe_media(video_path: str) -> dict:
     """Resolution, frame rate, frame count, duration and whether an audio track exists (reads the file only)."""
     info = {"readable": False, "width": None, "height": None, "fps": None, "frames": None,
             "duration_sec": None, "has_audio": False}
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(_cv2_path(video_path))
     try:
         if cap.isOpened():
             fps = cap.get(cv2.CAP_PROP_FPS) or 0
@@ -397,7 +420,7 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
         "timestamps": [], "mar_waveform": [], "rms_waveform": []
     }
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(_cv2_path(video_path))
     if not cap.isOpened():
         return {**invalid, "reason": "video could not be opened", "reason_key": "r.lips.no_video"}
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -407,7 +430,8 @@ def analyze_lipsync(video_path: str, y: np.ndarray, sr: int = SAMPLE_RATE,
     max_frame = int(max_seconds * fps)
 
     options = vision.FaceLandmarkerOptions(
-        base_options=mp_python.BaseOptions(model_asset_path=model_path),
+        # The model is passed as bytes: MediaPipe can't open non-ASCII paths on Windows.
+        base_options=mp_python.BaseOptions(model_asset_buffer=Path(model_path).read_bytes()),
         running_mode=vision.RunningMode.VIDEO,
         num_faces=1
     )
@@ -536,7 +560,7 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
 
 def _media_id(path: str) -> str:
     """A cache key for a media file: its name and size (cached downloads are named after their source)."""
-    return f"{os.path.basename(path)}:{os.path.getsize(path)}"
+    return f"{Path(path).name}:{Path(path).stat().st_size}"
 
 
 def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground_truth_text: str,
@@ -570,8 +594,8 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
 
     step("Extracting audio from both videos...", 0.10)
     with tempfile.TemporaryDirectory(prefix="dubeval_") as tmp:
-        y_orig = load_audio(extract_audio(original_video_path, os.path.join(tmp, "orig.wav")))
-        y_dub = load_audio(extract_audio(dubbed_video_path, os.path.join(tmp, "dubbed.wav")))
+        y_orig = load_audio(extract_audio(original_video_path, str(Path(tmp) / "orig.wav")))
+        y_dub = load_audio(extract_audio(dubbed_video_path, str(Path(tmp) / "dubbed.wav")))
 
     step("Measuring loudness and silence...", 0.15)
     orig_ac = analyze_acoustics(y_orig)

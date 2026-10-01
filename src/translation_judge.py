@@ -11,6 +11,7 @@ import os
 import json
 import time
 import logging
+from pathlib import Path
 from typing import Callable, Optional
 
 import requests
@@ -82,8 +83,8 @@ def claude_available() -> bool:
         import anthropic  # noqa: F401
     except ImportError:
         return False
-    profile_dir = os.path.join(os.path.expanduser("~"), ".config", "anthropic")
-    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.path.isdir(profile_dir))
+    profile_dir = Path.home() / ".config" / "anthropic"
+    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or profile_dir.is_dir())
 
 
 def judge_provider() -> Optional[str]:

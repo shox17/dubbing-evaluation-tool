@@ -5,10 +5,10 @@ plain-language explanation and how it is graded, lists timestamped things to che
 verdict, all in the chosen interface language (texts live in src/report_text.py). render_text and render_html
 present the same report. Pure: no file writes, no network.
 """
-import os
 import html
 import math
 import textwrap
+from pathlib import Path
 from typing import Callable, Optional
 
 from src.evaluate import base_lang, whisper_language
@@ -279,7 +279,7 @@ def _project(r: dict) -> dict:
     p, meta = r.get("pipeline", {}), r.get("metadata", {})
     share = p.get("share") or {}
     return {
-        "title": share.get("title") or os.path.basename(p.get("input_video_path", "")),
+        "title": share.get("title") or Path(p.get("input_video_path") or "").name,
         "perso_seq": share.get("seq"),
         "share_url": share.get("share_url"),
         "source_language": share.get("source_language_name") or meta.get("detected_source_language"),

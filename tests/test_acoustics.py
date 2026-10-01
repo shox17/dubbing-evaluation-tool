@@ -65,3 +65,15 @@ def test_language_windows_count_overlapping_speech_once(monkeypatch):
     # Original and dub speak over the same 2 s: 2 s of speech, not 4, so the window is skipped.
     assert evaluate.language_windows(y, None, [[1.0, 3.0], [1.0, 3.0]], "ko") == []
     assert len(evaluate.language_windows(y, None, [[1.0, 3.0], [2.5, 5.0]], "ko")) == 1
+
+
+def test_opencv_gets_an_ascii_path_on_windows(monkeypatch, tmp_path):
+    import os
+    from src.evaluate import _cv2_path
+    folder = tmp_path / "사용자" / "a"
+    folder.mkdir(parents=True)
+    video = str(folder / "v.mp4")
+    assert _cv2_path(video) == video                          # macOS / Linux: unchanged
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.chdir(tmp_path / "사용자")
+    assert _cv2_path(video) == os.path.join("a", "v.mp4")     # relative path is plain ASCII
