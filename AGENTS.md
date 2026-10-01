@@ -52,7 +52,7 @@ printf 'GEMINI_API_KEY=%s\n' "<key>" > .env  # optional: turns on the translatio
 pytest -m "not slow"
 ```
 - If `pip install` fails on another Python version, install unpinned:
-  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests onnxruntime anthropic pytest`.
+  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests onnxruntime fastapi uvicorn anthropic pytest httpx`.
 - The first evaluation downloads the Whisper `base` model (~145 MB) to `~/.cache/whisper`. Run one evaluation
   before a demo so the download is done.
 - `.env` is git-ignored; a fresh clone has none. Without a key everything works except the translation check,

@@ -5,6 +5,7 @@
     python qa.py batch links.txt --out ./output/batch       (one link per line, optionally ",good|check|poor")
     python qa.py history --days 30                          (every past evaluation: totals, language pairs, trends)
     python qa.py feedback                                   (reviewers' votes: which checks raise false alarms)
+    python qa.py serve [--host 127.0.0.1] [--port 8000]     (REST API; docs at /docs)
 
 Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
 mode saves comparison.* plus report_A.* and report_B.*.
@@ -147,12 +148,26 @@ def main(argv: list[str] | None = None) -> int:
     """
     use_utf8_console()
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["serve"]:
+        return _serve(argv[1:])
     parsers = {"compare": parse_compare_args, "batch": parse_batch_args, "history": parse_history_args,
                "feedback": parse_feedback_args}
     args = parsers[argv[0]](argv[1:]) if argv[:1] and argv[0] in parsers else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
         return _run(args, err)
+
+
+def _serve(argv: list[str]) -> int:
+    """Runs the REST API (src/api.py)."""
+    ap = argparse.ArgumentParser(prog="qa.py serve", description="Run the REST API (interactive docs at /docs). "
+                                 "Listening beyond this machine requires DUBBING_QA_API_TOKEN.")
+    ap.add_argument("--host", default="127.0.0.1", help="Address to listen on (default 127.0.0.1: this machine only)")
+    ap.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
+    args = ap.parse_args(argv)
+    from src.api import serve
+    serve(args.host, args.port)
+    return 0
 
 
 def _has_real_stderr() -> bool:
