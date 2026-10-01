@@ -18,8 +18,10 @@ LONG_SILENCE_SEC = (2.0, 4.0)        # original speaks, dub silent: Check from 2
 LOUDNESS_JUMP_DB = (10.0, 16.0)      # dub vs original level, after removing the overall offset
 LOUDNESS_ACTIVE_DB = -45.0           # both tracks must be louder than this for the loudness comparison
 LOUDNESS_MIN_SEC = 1.0               # a level difference must last this long to count
-LANG_WRONG = (0.5, 0.8)              # another language's probability: Check from 0.5, Poor from 0.8...
-LANG_EXPECTED_MAX = 0.2              # ...while the expected language stays below this
+LANG_SOURCE = (0.5, 0.8)             # the original's language heard in the dub: Check from 0.5, Poor from 0.8
+LANG_OTHER = (0.8, 0.95)             # any other language: stricter, because Whisper guesses odd languages on noise
+LANG_EXPECTED_MAX = 0.2              # ...in both cases only while the expected language stays below this
+LINE_MATCH_SEC = 1.0                 # a translation issue belongs to the original line starting this close to it
 JUDGE_DEFAULT_SEC = 2.0              # length of a translation issue when no transcript line contains it
 
 # Category id -> text key of its label. Ids are stable (JSON); labels follow the report language.
@@ -113,18 +115,25 @@ def _loudness(tr: Tr, ac: dict) -> list[dict]:
 def _language(tr: Tr, sr: dict, expected: Optional[str], source: Optional[str], names: dict) -> list[dict]:
     """Windows where the dub sounds like another language, or like the original's (original voice left in)."""
     out = []
-    name = lambda code: names.get(code) or code
+    name = lambda code: names.get(code) or _language_name(code)
     for w in sr.get("dubbed_language_windows") or []:
-        if not expected or w["language"] == expected or w["probability"] < LANG_WRONG[0] \
+        bands = LANG_SOURCE if source and w["language"] == source else LANG_OTHER
+        if not expected or w["language"] == expected or w["probability"] < bands[0] \
                 or w.get("expected_probability", 0.0) >= LANG_EXPECTED_MAX:
             continue
-        sev = "poor" if w["probability"] >= LANG_WRONG[1] else "check"
+        sev = "poor" if w["probability"] >= bands[1] else "check"
         if source and w["language"] == source:
             msg = tr("r.int.original_language", lang=name(source))
         else:
             msg = tr("r.int.other_language", detected=name(w["language"]), expected=name(expected))
         out.append(_item(tr, w["start"], w["end"], "wrong_language", sev, "language", msg))
     return out
+
+
+def _language_name(code: str) -> str:
+    """A readable name for a Whisper language code ("nn" -> "Nynorsk"), or the code itself."""
+    from whisper.tokenizer import LANGUAGES
+    return LANGUAGES.get(code, code).title()
 
 
 def _clarity(tr: Tr, sr: dict) -> list[dict]:
@@ -134,10 +143,15 @@ def _clarity(tr: Tr, sr: dict) -> list[dict]:
 
 
 def _line_end(segments: list[dict], start: float) -> float:
-    """End of the original transcript line that contains start (or starts right there)."""
-    for s in segments or []:
-        if s["start"] - 0.25 <= start < s["end"]:
-            return max(s["end"], start)
+    """End of the original line the issue points at: the line starting closest to it (the judge quotes line start
+    times, rounded), else the line containing it, else a default length."""
+    segments = segments or []
+    near = min(segments, key=lambda s: abs(s["start"] - start), default=None)
+    if near and abs(near["start"] - start) <= LINE_MATCH_SEC and near["end"] > start:
+        return near["end"]
+    for s in segments:
+        if s["start"] <= start < s["end"]:
+            return s["end"]
     return start + JUDGE_DEFAULT_SEC
 
 

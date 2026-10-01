@@ -14,7 +14,10 @@ NO_SLEEP = lambda s: None
 
 
 @pytest.mark.parametrize("text", [SHARE_URL, f"  {SHARE_URL}  ", SHARE_TOKEN, SHARE_URL.replace("https://", ""),
-                                  SHARE_URL.replace("/en/", "/ko/") + "&utm=x", f"https://www.perso.ai/share/video-translator?seq={SHARE_TOKEN}"])
+                                  SHARE_URL.replace("/en/", "/ko/") + "&utm=x", f"https://www.perso.ai/share/video-translator?seq={SHARE_TOKEN}",
+                                  # gallery pages carry the same public token
+                                  f"https://perso.ai/video-translator/en-es/movies-tv-shows?seq={SHARE_TOKEN}",
+                                  f"https://perso.ai/video-translator/en-es/animation?seq={SHARE_TOKEN}&lang=en"])
 def test_share_links_are_parsed(text):
     assert parse_share_url(text) == SHARE_TOKEN
 

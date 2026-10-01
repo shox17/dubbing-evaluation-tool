@@ -172,7 +172,7 @@ output/                  The CLI's default --out folder (git-ignored)
 - Google's Gemini API often returns 503 "high demand"; the judge retries and falls back across four Flash models,
   then reports "busy, try again in a minute".
 - The job registry is in memory; restarting the app during a run loses tracking.
-- Interval thresholds (long silence 2/4 s, loudness jump 10/16 dB, wrong language 50/80%) are first guesses checked on
+- Interval thresholds (long silence 2/4 s, loudness jump 10/16 dB, wrong language: original's 50/80%, other 80/95%) are first guesses checked on
   the sample only. The per-window language check needs ~3 s of speech per 10 s window.
-- Compare mode was verified with fake share links (real Whisper) and in the browser; not yet on two real Perso dubs
-  of one video, and not on a real Windows machine.
+- Compare mode was verified with fake share links (real Whisper), in the browser, and on two real EN→ES Perso dubs of
+  one video; not yet on a real Windows machine.

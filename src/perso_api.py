@@ -21,6 +21,8 @@ ERROR_HINTS = {
 }
 
 SHARE_HOSTS = ("perso.ai", "www.perso.ai")
+NOT_A_SHARE_LINK = ("This doesn't look like a Perso share link. Open the dubbed video in Perso, choose Share, and copy "
+                    "the link (it contains ?seq=).")
 SHARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-.~]{16,}$")
 
 
@@ -58,17 +60,21 @@ def _error_from_response(resp: requests.Response) -> PersoError:
 
 
 def parse_share_url(url: str) -> str:
-    """The share token from a Perso share link (or a bare token). Raises ValueError for anything else."""
+    """The share token from a Perso share link (or a bare token). Raises ValueError for anything else.
+
+    Perso shares a dub under several URL shapes, all carrying the same public token in seq=:
+    /<lang>/share/video-translator?seq=… (Share dialog) and /video-translator/<src>-<tgt>/<category>?seq=…
+    (gallery pages). Any perso.ai link with a valid seq token is accepted.
+    """
     text = (url or "").strip()
     if not text:
         raise ValueError("Paste a Perso share link, for example https://perso.ai/en/share/video-translator?seq=…")
     if SHARE_TOKEN_RE.match(text):
         return text
     parts = urlsplit(text if "://" in text else "https://" + text)
-    if parts.hostname not in SHARE_HOSTS or "/share" not in parts.path:
-        raise ValueError("This doesn't look like a Perso share link. Open the dubbed video in Perso, "
-                         "choose Share, and copy the link (it contains /share/ and ?seq=).")
     token = (parse_qs(parts.query).get("seq") or [""])[0].strip()
+    if parts.hostname not in SHARE_HOSTS or not (token or "/share" in parts.path):
+        raise ValueError(NOT_A_SHARE_LINK)
     if not SHARE_TOKEN_RE.match(token):
         raise ValueError("The share link is missing its seq=… part. Copy the whole link from Perso again.")
     return token

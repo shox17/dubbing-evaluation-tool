@@ -121,3 +121,25 @@ def test_report_lists_intervals_and_things_to_check_from_the_same_source():
     assert [i["category"] for i in rep["problem_intervals"]] == ["long_silence"]
     assert rep["problem_seconds"] == 5.0
     assert rep["things_to_check"][0]["category"] == "long silence" and rep["things_to_check"][0]["end"] == 7.0
+
+
+def test_noise_guessed_as_an_odd_language_is_not_flagged_but_the_original_language_is():
+    windows = [{"start": 10.0, "end": 20.0, "language": "nn", "probability": 0.51, "expected_probability": 0.01},
+               {"start": 20.0, "end": 30.0, "language": "en", "probability": 0.55, "expected_probability": 0.05},
+               {"start": 40.0, "end": 50.0, "language": "ja", "probability": 0.9, "expected_probability": 0.02}]
+    r = make_results(timing_alignment={"mismatches": []}, speech_recognition={"dubbed_language_windows": windows},
+                     acoustic_metrics={"dubbed_duration_sec": 60.0, "original_duration_sec": 60.0})
+    out = build_intervals(r, tr, "en")["intervals"]
+    assert [(i["start"], i["severity"]) for i in out] == [(20.0, "check"), (40.0, "check")]
+    assert "original language" in out[0]["description"] and "Japanese" in out[1]["description"]
+
+
+def test_a_translation_issue_takes_the_line_starting_at_its_time():
+    segs = [{"start": 23.78, "end": 26.84, "text": "a"}, {"start": 26.84, "end": 30.04, "text": "b"}]
+    judged = {**JUDGED, "issues": [{"type": "missing", "severity": "minor", "start_sec": 26.8, "original": "b",
+                                    "dubbed": "", "explanation": "x", "may_be_recognition_error": False}]}
+    r = make_results(translation_judge=judged, timing_alignment={"mismatches": []},
+                     speech_recognition={"original_segments": segs},
+                     acoustic_metrics={"dubbed_duration_sec": 60.0, "original_duration_sec": 60.0})
+    (i,) = build_intervals(r, tr, "en")["intervals"]
+    assert (i["start"], i["end"]) == (26.8, 30.0)

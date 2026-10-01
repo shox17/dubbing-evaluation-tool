@@ -27,7 +27,7 @@ pipeline.run_comparison(url_a, url_b, out_dir)           stages: dub_a, dub_b, c
 
 ### `src/perso_api.py`
 Share links only; no API key, no account (https://developers.perso.ai/llms.txt).
-- `parse_share_url` takes the `seq=` token from `https://perso.ai/<lang>/share/video-translator?seq=…` (or a bare token), and raises `ValueError` with a plain message for anything else, before any network call.
+- `parse_share_url` takes the `seq=` token from any perso.ai link: the Share dialog's `https://perso.ai/<lang>/share/video-translator?seq=…`, gallery pages like `https://perso.ai/video-translator/en-es/<category>?seq=…`, or a bare token, and raises `ValueError` with a plain message for anything else, before any network call.
 - `get_shared_project` calls the public `GET /video-translator/api/v1/projects/shared/{token}`. It returns title, `durationMs`, `sourceLanguage` / `targetLanguage`, and `originalFileUrl`, `translatedFileUrl`, `lipSyncFileUrl`, `isLipSync`. VT4035 becomes "sharing is turned off"; an unknown link or a project without a finished dub also get plain messages. 429 and 5xx are retried with backoff.
 - A project without `originalFileUrl` is accepted here; the pipeline then needs `--original` (else a plain error).
 - `download_media` streams a relative `/perso-storage/…` path from `https://portal-media.perso.ai` (URL-encoded) with retries and an atomic `.part` rename.

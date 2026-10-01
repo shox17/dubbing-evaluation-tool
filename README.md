@@ -85,7 +85,7 @@ The first run downloads the Whisper `base` speech model (~145 MB) to `~/.cache/w
 ## Using it
 
 ### Get a share link
-In Perso, open the dubbed video, choose **Share**, and copy the link. It looks like `https://perso.ai/en/share/video-translator?seq=…`.
+In Perso, open the dubbed video, choose **Share**, and copy the link. It looks like `https://perso.ai/en/share/video-translator?seq=…`. Links from Perso's gallery pages work too (`https://perso.ai/video-translator/en-es/<category>?seq=…`): any perso.ai link with a `seq=` token.
 
 ### The app
 1. Paste the link. The app shows the project: title, languages, length, and whether it is lip-synced. The **lip-synced video is evaluated** when there is one, because that is what viewers get, and then **lip movement is measured automatically**; for a dub without lip-sync it is skipped.
@@ -204,7 +204,7 @@ Open items are tracked in [docs/ENGINEERING_REVIEW.md](docs/ENGINEERING_REVIEW.m
 | Problem | What to do |
 |---|---|
 | `pip install` fails on `mediapipe` or `numpy` | Use Python 3.14 (`python3 --version`). Older Pythons need different package versions. |
-| "This doesn't look like a Perso share link" | Copy the whole link from Perso's **Share** dialog; it contains `/share/` and `?seq=`. |
+| "This doesn't look like a Perso share link" | Copy the whole link from Perso (Share dialog or gallery page); it must be on perso.ai and contain `?seq=`. |
 | "Sharing is turned off for this Perso project" | Ask the owner to turn sharing on for that video in Perso, then try again. |
 | "This shared project has no finished dubbed video yet" | Wait until Perso finishes dubbing, then try again. |
 | "This share link has no original video" | Pass the original with `--original <file or URL>`. |
