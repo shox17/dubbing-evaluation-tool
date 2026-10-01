@@ -659,8 +659,12 @@ REPORT_TEXT = {
     # ----- things to check -----
     "r.cat.timing": {"en": "timing", "ko": "타이밍", "pt": "tempo", "es": "momento"},
     "r.cat.clarity": {"en": "clarity", "ko": "명료도", "pt": "clareza", "es": "claridad"},
-    "r.cat.missing": {"en": "missing", "ko": "누락", "pt": "faltando", "es": "falta"},
-    "r.cat.added": {"en": "added", "ko": "추가", "pt": "acrescentado", "es": "añadido"},
+    "r.cat.missing": {"en": "missing speech", "ko": "누락된 말", "pt": "fala faltando", "es": "habla que falta"},
+    "r.cat.added": {"en": "added speech", "ko": "추가된 말", "pt": "fala acrescentada", "es": "habla añadida"},
+    "r.cat.long_silence": {"en": "long silence", "ko": "긴 무음", "pt": "silêncio longo", "es": "silencio largo"},
+    "r.cat.distortion": {"en": "distortion", "ko": "소리 찌그러짐", "pt": "distorção", "es": "distorsión"},
+    "r.cat.loudness_jump": {"en": "loudness jump", "ko": "음량 급변", "pt": "salto de volume", "es": "salto de volumen"},
+    "r.cat.wrong_language": {"en": "wrong language", "ko": "다른 언어", "pt": "idioma errado", "es": "idioma incorrecto"},
     "r.cat.mistranslation": {"en": "mistranslation", "ko": "오역", "pt": "erro de tradução", "es": "error de traducción"},
     "r.cat.name_or_number": {"en": "name or number", "ko": "이름·숫자", "pt": "nome ou número", "es": "nombre o número"},
     "r.cat.general": {"en": "general", "ko": "일반", "pt": "geral", "es": "general"},
@@ -681,6 +685,45 @@ REPORT_TEXT = {
         "ko": "더빙의 이 부분을 알아듣기 어렵습니다: “{text}”. 목소리가 또렷한지 들어 보세요.",
         "pt": "Este trecho da dublagem é difícil de entender: “{text}”. Ouça para ver se a voz está clara.",
         "es": "Esta parte del doblaje se entiende mal: “{text}”. Escucha para comprobar que la voz es clara.",
+    },
+    "r.int.long_silence": {
+        "en": "The original speaks for {sec} s here, but the dub is silent. A line is probably missing from the dub.",
+        "ko": "원본은 여기서 {sec}초 동안 말하는데 더빙은 조용합니다. 더빙에서 문장이 빠졌을 가능성이 높습니다.",
+        "pt": "O original fala por {sec} s aqui, mas a dublagem fica em silêncio. Provavelmente falta uma fala.",
+        "es": "El original habla {sec} s aquí, pero el doblaje calla. Probablemente falta una frase en el doblaje.",
+    },
+    "r.int.clipping": {
+        "en": "The dub's audio hits the maximum level here and distorts. Listen for crackling.",
+        "ko": "여기서 더빙 소리가 최대 음량을 넘어 찌그러집니다. 지직거리는 소리가 나는지 들어 보세요.",
+        "pt": "O áudio da dublagem atinge o nível máximo aqui e distorce. Ouça se há chiado.",
+        "es": "El audio del doblaje llega al nivel máximo aquí y se distorsiona. Escucha si hay chasquidos.",
+    },
+    "r.int.louder": {
+        "en": "The dub is about {db} dB louder than the original here. Listen for a sudden jump in volume.",
+        "ko": "여기서 더빙이 원본보다 약 {db} dB 더 큽니다. 음량이 갑자기 커지는지 들어 보세요.",
+        "pt": "A dublagem está cerca de {db} dB mais alta que o original aqui. Ouça se o volume salta de repente.",
+        "es": "El doblaje suena unos {db} dB más fuerte que el original aquí. Escucha si el volumen salta de golpe.",
+    },
+    "r.int.quieter": {
+        "en": "The dub is about {db} dB quieter than the original here. Viewers may struggle to hear this part.",
+        "ko": "여기서 더빙이 원본보다 약 {db} dB 더 작습니다. 시청자가 이 부분을 잘 듣지 못할 수 있습니다.",
+        "pt": "A dublagem está cerca de {db} dB mais baixa que o original aqui. Pode ser difícil ouvir este trecho.",
+        "es": "El doblaje suena unos {db} dB más bajo que el original aquí. Puede costar oír esta parte.",
+    },
+    "r.int.original_language": {
+        "en": "This part sounds like {lang}, the original language. The original voice may have been left in, or "
+              "the line wasn't dubbed.",
+        "ko": "이 부분은 원본 언어({lang})처럼 들립니다. 원래 목소리가 남아 있거나 이 문장이 더빙되지 않았을 수 있습니다.",
+        "pt": "Este trecho soa como {lang}, o idioma original. A voz original pode ter ficado, ou a fala não foi dublada.",
+        "es": "Esta parte suena a {lang}, el idioma original. Puede que quedara la voz original o que la frase no se "
+              "doblara.",
+    },
+    "r.int.other_language": {
+        "en": "This part sounds like {detected}, not {expected}. Check that it was dubbed into the right language.",
+        "ko": "이 부분은 기대한 언어({expected})가 아니라 다른 언어({detected})처럼 들립니다. 올바른 언어로 더빙됐는지 "
+              "확인하세요.",
+        "pt": "Este trecho soa como {detected}, não {expected}. Confira se foi dublado no idioma certo.",
+        "es": "Esta parte suena a {detected}, no a {expected}. Comprueba que se dobló al idioma correcto.",
     },
     "r.todo.maybe_asr": {
         "en": "(Probably a speech-recognition error, not a dubbing error.)",

@@ -29,3 +29,30 @@ def test_pure_silence_does_not_crash():
     assert a["mean_rms_energy"] == 0.0
     assert a["volume_stability_pct"] == 0.0
     assert a["silence_ratio_pct"] == 100.0
+
+
+def test_clipping_intervals_group_clipped_samples():
+    from src.evaluate import clipping_intervals
+    y = np.zeros(16000 * 10, dtype=np.float32)
+    y[16000 * 2:16000 * 2 + 100] = 1.0            # 2.0 s
+    y[int(16000 * 2.3)] = -1.0                     # 0.3 s later: same interval
+    y[16000 * 7] = 1.0                             # far away: its own interval
+    assert clipping_intervals(y) == [[2.0, 2.3], [7.0, 7.0]]
+    assert clipping_intervals(np.zeros(100, dtype=np.float32)) == []
+
+
+def test_language_windows_skip_silence_and_report_each_window(monkeypatch):
+    from src import evaluate
+    seen = []
+
+    def fake_probs(chunk, model):
+        """English for the second window, Korean otherwise."""
+        seen.append(len(chunk))
+        return {"ko": 0.1, "en": 0.9} if len(seen) == 2 else {"ko": 0.95, "en": 0.05}
+    monkeypatch.setattr(evaluate, "_language_probs", fake_probs)
+    y = np.zeros(16000 * 35, dtype=np.float32)
+    speech = [[0.0, 9.0], [10.5, 19.0], [31.0, 31.5]]              # last window has only 0.5 s of speech
+    out = evaluate.language_windows(y, None, speech, "ko")
+    assert [(w["start"], w["end"], w["language"]) for w in out] == [(0.0, 10.0, "ko"), (10.0, 20.0, "en")]
+    assert out[1]["expected_probability"] == 0.1 and seen == [160000, 160000]
+    assert evaluate.language_windows(y, None, speech, None) == []   # no Whisper model for the language

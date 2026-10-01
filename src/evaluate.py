@@ -52,9 +52,14 @@ CLIP_LEVEL = 0.999                 # |sample| at or above this counts as clipped
 SPEECH_GRID_SEC = 0.05             # resolution of the speech-timing comparison
 SPEECH_MERGE_GAP_SEC = 0.3         # word gaps shorter than this are one stretch of speech
 MISMATCH_MIN_SEC = 0.5             # only-one-track-speaks stretches shorter than this are ignored
-MAX_MISMATCHES = 8                 # longest mismatches listed in the report
+MAX_MISMATCHES = 50                # longest mismatches kept (every one becomes a problem interval)
 WHISPER_LOGPROB_OK = -1.0          # Whisper's own thresholds for trusting a segment
 WHISPER_NO_SPEECH_OK = 0.6
+CLIP_MERGE_GAP_SEC = 0.5           # clipped samples closer than this form one distortion interval
+MAX_CLIP_INTERVALS = 50
+LANG_WINDOW_SEC = 10.0             # the dub's language is checked per window of this length...
+LANG_MAX_WINDOWS = 60              # ...widened for long videos so at most this many windows are checked
+LANG_MIN_SPEECH_SEC = 3.0          # windows with less speech than this are skipped
 
 _whisper_models: dict = {}
 _whisper_lock = threading.Lock()
@@ -184,15 +189,59 @@ def transcribe(y: np.ndarray, whisper_model, language: Optional[str] = None) -> 
             "segments": segments}
 
 
+def _language_probs(y: np.ndarray, whisper_model) -> dict:
+    """Whisper's probability for every language, from the first 30 s of y."""
+    audio = whisper.pad_or_trim(y.astype(np.float32))
+    mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model.dims.n_mels).to(whisper_model.device)
+    _, probs = whisper_model.detect_language(mel)
+    return probs
+
+
 def detect_language(y: np.ndarray, whisper_model) -> tuple[Optional[str], Optional[float]]:
     """Whisper's guess of the spoken language in the first 30 s, with its probability."""
     if not len(y):
         return None, None
-    audio = whisper.pad_or_trim(y.astype(np.float32))
-    mel = whisper.log_mel_spectrogram(audio, n_mels=whisper_model.dims.n_mels).to(whisper_model.device)
-    _, probs = whisper_model.detect_language(mel)
+    probs = _language_probs(y, whisper_model)
     code = max(probs, key=probs.get)
     return code, round(float(probs[code]), 3)
+
+
+def language_windows(y: np.ndarray, whisper_model, speech: list[list[float]], expected: Optional[str],
+                     sr: int = SAMPLE_RATE) -> list[dict]:
+    """The dub's language window by window, so a part left in the original language (or another one) is found.
+
+    Each window with enough speech gets Whisper's top language, its probability and the expected language's
+    probability. Windows widen on long videos so at most LANG_MAX_WINDOWS are checked.
+    """
+    duration = len(y) / sr if sr else 0.0
+    if not expected or duration <= 0:
+        return []
+    width = max(LANG_WINDOW_SEC, duration / LANG_MAX_WINDOWS)
+    windows, start = [], 0.0
+    while start < duration:
+        end = min(duration, start + width)
+        spoken = sum(max(0.0, min(e, end) - max(s, start)) for s, e in speech)
+        if spoken >= min(LANG_MIN_SPEECH_SEC, (end - start) * 0.5):
+            probs = _language_probs(y[int(start * sr):int(end * sr)], whisper_model)
+            top = max(probs, key=probs.get)
+            windows.append({"start": round(start, 2), "end": round(end, 2), "language": top,
+                            "probability": round(float(probs[top]), 3),
+                            "expected_probability": round(float(probs.get(expected, 0.0)), 3)})
+        start = end
+    return windows
+
+
+def clipping_intervals(y: np.ndarray, sr: int = SAMPLE_RATE) -> list[list[float]]:
+    """Where the dub's audio hits full scale: [start, end] stretches, merging clips closer than 0.5 s."""
+    idx = np.flatnonzero(np.abs(y) >= CLIP_LEVEL) if len(y) else np.array([], dtype=int)
+    if not len(idx):
+        return []
+    gap = int(CLIP_MERGE_GAP_SEC * sr)
+    breaks = np.flatnonzero(np.diff(idx) > gap)
+    starts, ends = np.concatenate([[idx[0]], idx[breaks + 1]]), np.concatenate([idx[breaks], [idx[-1]]])
+    spans = [[round(a / sr, 2), round((b + 1) / sr, 2)] for a, b in zip(starts, ends)]
+    longest = sorted(spans, key=lambda s: s[0] - s[1])[:MAX_CLIP_INTERVALS]
+    return sorted(longest)
 
 
 def _is_real_speech(seg: dict) -> bool:
@@ -517,6 +566,8 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     dub_speech = speech_intervals(dub_stt["segments"])
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
+    step("Checking the dub's language part by part...", 0.67)
+    lang_windows = language_windows(y_dub, model, dub_speech, stt_lang)
     integrity = video_integrity(original_video_path, dubbed_video_path)
 
     if include_lipsync:
@@ -558,6 +609,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "original_peak_dbfs": orig_ac["peak_dbfs"],
             "dubbed_peak_dbfs": dub_ac["peak_dbfs"],
             "dubbed_clipping_pct": dub_ac["clipping_pct"],
+            "dubbed_clipping_intervals": clipping_intervals(y_dub),
             "loudness_envelope": {
                 "step_sec": 0.25,
                 "original_db": loudness_envelope(y_orig),
@@ -573,6 +625,7 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
             "dubbed_speech_rate": speech_rate(dub_stt["text"], dub_speaking, target_lang),
             "dubbed_language_detected": dub_detected,
             "dubbed_language_probability": dub_detected_prob,
+            "dubbed_language_windows": lang_windows,
             "clarity": clarity,
             "original_segments": [{k: s[k] for k in ("start", "end", "text")} for s in orig_stt["segments"]],
             "dubbed_segments": [{k: s[k] for k in ("start", "end", "text")} for s in dub_stt["segments"]]

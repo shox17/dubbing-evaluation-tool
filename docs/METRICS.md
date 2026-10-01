@@ -107,6 +107,22 @@ It sees transcripts, not audio, so a Whisper mishearing can look like a translat
 ## 6. The report and the verdict (`report.py`)
 Every measure gets a level (good / check / poor / info / not measured), a one-sentence explanation and the thresholds used. **Verdict:** any Poor → Poor; otherwise any Check → Needs review; otherwise Good. Info (lip movement, speech offsets) and not-measured items never change it, and the report lists why each unmeasured item wasn't measured. There's deliberately no single 0–100 score: weights between these measures would be arbitrary and hard to defend.
 
+## 7. Problem intervals (`intervals.py`)
+Every issue becomes a time range `{start, end, dub, category, severity (poor/check), check, description}`, in `report.problem_intervals`. Things to check are built from the same list.
+
+| Category | Found by | Severity |
+|---|---|---|
+| `long_silence` | speech timing: original speaks, dub silent for ≥ 2 s | Poor from 4 s, else Check |
+| `timing_mismatch` | speech timing: shorter one-track-only stretches (≥ 0.5 s) | Check |
+| `missing_speech` / `added_speech` | translation check | Poor if major, else Check |
+| `mistranslation`, `names_numbers` | translation check | Poor if major, else Check |
+| `distortion` | clipped samples (`dubbed_clipping_intervals`, merged within 0.5 s) | Poor if the clipping row is Poor, else Check |
+| `loudness_jump` | loudness envelope: dub vs original level, after removing their overall offset, differs by ≥ 10 dB for ≥ 1 s where both tracks have sound | Poor from 16 dB, else Check |
+| `wrong_language` | Whisper language detection per 10 s window of the dub (`dubbed_language_windows`; windows widen so at most 60 are checked): another language at ≥ 50% while the expected one is < 20%. If it is the original's language, the description says the original voice may have been left in | Poor from 80%, else Check |
+| `unclear_speech` | voice clarity: segments Whisper recognised with low confidence | Check |
+
+Rules: ranges of the same category that overlap or are less than 0.5 s apart merge (worst severity kept, `merged` counts them); ranges are clipped to the dub's length, rounded to 0.1 s and sorted by start. A translation issue lasts until the end of the original transcript line containing it (2 s if none). Issues the judge flags as probable speech-recognition errors go to `report.possible_asr_errors` and never count. `report.problem_seconds` is the time covered by at least one interval (overlaps count once). Intervals don't change the verdict, which comes from the measure levels; compare mode uses `problem_seconds` as a tie-breaker.
+
 ## Sanity warnings (`warnings` in results)
 Raised automatically when:
 - the duration differs by more than 20% (probably not a matching pair),

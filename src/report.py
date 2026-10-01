@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from src.evaluate import base_lang, whisper_language
 from src.i18n import DEFAULT_UI_LANGUAGE, t as i18n_t
+from src.intervals import build_intervals, local_text as _local
 
 # Thresholds, in one place so the report can print exactly what it applied.
 LENGTH_PCT = (5.0, 15.0)                 # |dub - original| / original
@@ -64,13 +65,6 @@ def _metric(tr: Tr, mid: str, level: str, message: str, value=None, display: str
 def _na(tr: Tr, mid: str, reason: str) -> dict:
     """A measure that couldn't be measured, with the reason."""
     return _metric(tr, mid, "not_measured", reason)
-
-
-def _local(value, lang: str) -> str:
-    """Text in lang from a {lang: text} dict (the judge's output), falling back to English; plain strings pass."""
-    if isinstance(value, dict):
-        return value.get(lang) or value.get("en") or ""
-    return str(value or "")
 
 
 # ---------------- sections ----------------
@@ -268,23 +262,11 @@ def _lipsync(tr: Tr, ls: dict, is_lipsync: Optional[bool]) -> list[dict]:
 
 
 # ---------------- things to check ----------------
-def _things_to_check(tr: Tr, r: dict, tj: Optional[dict], lang: str) -> list[dict]:
-    """Timestamped places a person should look at, in time order."""
-    items = []
-    for m in r.get("timing_alignment", {}).get("mismatches", []):
-        items.append({"start": m["start"], "end": m["end"], "category": tr("r.cat.timing"), "severity": "check",
-                      "message": tr(f"r.todo.{m['kind']}")})
-    for s in (r.get("speech_recognition", {}).get("clarity") or {}).get("unclear_segments", []):
-        items.append({"start": s["start"], "end": s["end"], "category": tr("r.cat.clarity"), "severity": "check",
-                      "message": tr("r.todo.unclear", text=s["text"])})
-    for i in (tj or {}).get("issues", []) if (tj or {}).get("measured") else []:
-        quote = " → ".join(q for q in (f"“{i['original']}”" if i["original"] else "",
-                                       f"“{i['dubbed']}”" if i["dubbed"] else "") if q)
-        maybe = bool(i.get("may_be_recognition_error"))
-        items.append({"start": i["start_sec"], "end": None, "category": tr(f"r.cat.{i['type']}"),
-                      "severity": "poor" if i["severity"] == "major" and not maybe else "check",
-                      "message": _local(i["explanation"], lang) + (" " + tr("r.todo.maybe_asr") if maybe else "")
-                      + (f" {quote}" if quote else "")})
+def _things_to_check(tr: Tr, r: dict, found: dict) -> list[dict]:
+    """Timestamped places a person should look at, in time order: problem intervals, probable recognition
+    errors (listed, never counted) and general warnings without a time."""
+    items = [{"start": i["start"], "end": i["end"], "category": i["category_label"], "severity": i["severity"],
+              "message": i["description"]} for i in found["intervals"] + found["possible_asr_errors"]]
     for w in r.get("warnings", []):
         text = tr(w["key"], **w.get("params", {})) if isinstance(w, dict) else str(w)
         items.append({"start": None, "end": None, "category": tr("r.cat.general"), "severity": "check", "message": text})
@@ -321,8 +303,9 @@ def _headline(tr: Tr, level: str, counts: dict) -> str:
         " " + _pl(tr, "r.headline.plus_check", counts["check"]) if counts["check"] else "")
 
 
-def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
-    """The full report for a results dict, in lang: overall verdict, sections of measures, things to check."""
+def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE, dub: Optional[str] = None) -> dict:
+    """The full report for a results dict, in lang: overall verdict, sections of measures, problem intervals and
+    things to check. dub labels the intervals ("A" / "B") when two dubs are compared."""
     tr: Tr = lambda key, **p: i18n_t(key, lang, **p)
     ac, sr = r["acoustic_metrics"], r["speech_recognition"]
     project = _project(r)
@@ -345,6 +328,8 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
     metrics = [m for s in sections for m in s["metrics"]]
     counts = {lv: sum(1 for m in metrics if m["level"] == lv) for lv in (*LEVELS, "not_measured")}
     level = "poor" if counts["poor"] else "check" if counts["check"] else "good"
+    clipping_poor = any(m["id"] == "clipping" and m["level"] == "poor" for m in metrics)
+    found = build_intervals(r, tr, lang, clipping_poor=clipping_poor, dub=dub)
     return {
         "report_version": 2,
         "lang": lang,
@@ -352,7 +337,10 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
         "overall": {"level": level, "label": tr(f"verdict.{level}"), "headline": _headline(tr, level, counts),
                     "counts": counts},
         "sections": sections,
-        "things_to_check": _things_to_check(tr, r, tj, lang),
+        "problem_intervals": found["intervals"],
+        "possible_asr_errors": found["possible_asr_errors"],
+        "problem_seconds": found["problem_seconds"],
+        "things_to_check": _things_to_check(tr, r, found),
         "not_measured": [{"id": m["id"], "label": m["label"], "reason": m["message"]} for m in metrics
                          if m["level"] == "not_measured"],
         "method": {
