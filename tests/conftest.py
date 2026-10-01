@@ -32,10 +32,11 @@ def isolated_output(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def isolated_cache(tmp_path, monkeypatch):
     """Downloads and Whisper results are cached per share link; each test gets its own empty cache."""
-    from src import feedback, history, pipeline
+    from src import feedback, history, jobs, pipeline
     monkeypatch.setattr(pipeline, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(history, "HISTORY_FILE", tmp_path / "history.jsonl")    # never the real history
     monkeypatch.setattr(feedback, "FEEDBACK_FILE", tmp_path / "feedback.jsonl")  # nor the real votes
+    monkeypatch.setattr(jobs, "JOBS_DIR", tmp_path / "jobs")                     # nor the real job files
     return tmp_path / "cache"
 
 

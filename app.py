@@ -689,7 +689,7 @@ elif job is not None and job.status == "done":
         open_results(job.result)
     st.rerun()
 elif job is not None:
-    cancelled = job.status == "cancelled"
+    cancelled = job.status in ("cancelled", "interrupted")
     st.title(t("stopped.title") if cancelled else t("failed.title"),
              icon=":material/stop_circle:" if cancelled else ":material/error:")
     (st.info if cancelled else st.error)(translate_message(job.error or "", st.session_state.ui_lang))

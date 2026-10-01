@@ -445,6 +445,10 @@ MESSAGES = {
     "Comparing the dub voice with the original speakers...": {"ko": "더빙 목소리를 원래 화자와 비교 중...",
                                                               "pt": "Comparando a voz da dublagem com os falantes originais...",
                                                               "es": "Comparando la voz del doblaje con los hablantes originales..."},
+    "The app restarted while this job was running, so it stopped. Start it again.": {
+        "ko": "작업 도중 앱이 다시 시작되어 작업이 중단됐습니다. 다시 시작하세요.",
+        "pt": "O app reiniciou enquanto esta tarefa rodava, então ela parou. Comece de novo.",
+        "es": "La app se reinició mientras esta tarea se ejecutaba, así que se detuvo. Vuelve a empezarla."},
     "Comparing the dubs...": {"ko": "더빙 비교 중...", "pt": "Comparando as dublagens...",
                               "es": "Comparando los doblajes..."},
     "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {
