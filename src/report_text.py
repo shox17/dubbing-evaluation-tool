@@ -1345,6 +1345,7 @@ REPORT_TEXT = {
     "h.week_counts": {"en": "{n} dubs: {good} / {check} / {poor}", "ko": "더빙 {n}개: {good} / {check} / {poor}",
                       "pt": "{n} dublagens: {good} / {check} / {poor}", "es": "{n} doblajes: {good} / {check} / {poor}"},
     "h.recent": {"en": "Latest evaluations", "ko": "최근 평가", "pt": "Avaliações recentes", "es": "Evaluaciones recientes"},
+    "h.weekly_chart": {"en": "Week by week", "ko": "주별 추이", "pt": "Semana a semana", "es": "Semana a semana"},
     "h.week": {"en": "Week", "ko": "주", "pt": "Semana", "es": "Semana"},
     "h.when": {"en": "When", "ko": "시각", "pt": "Quando", "es": "Cuándo"},
     "h.mode": {"en": "From", "ko": "실행 방식", "pt": "Origem", "es": "Origen"},
@@ -1353,4 +1354,39 @@ REPORT_TEXT = {
     "h.last_days": {"en": "Last {n} days", "ko": "최근 {n}일", "pt": "Últimos {n} dias", "es": "Últimos {n} días"},
     "h.good_pct": {"en": "Passed", "ko": "통과율", "pt": "Aprovadas", "es": "Aprobados"},
     "h.open": {"en": "History", "ko": "평가 기록", "pt": "Histórico", "es": "Historial"},
+
+    # ----- reviewer feedback (src/feedback.py) -----
+    "f.title": {"en": "Reviewer feedback", "ko": "검토자 피드백", "pt": "Opinião dos revisores", "es": "Opinión de los revisores"},
+    "f.empty": {
+        "en": "No votes yet. In the app, mark each problem interval as a real problem (👍) or a false alarm (👎); this "
+              "summary then shows which checks flag too much.",
+        "ko": "아직 투표가 없습니다. 앱에서 각 문제 구간을 실제 문제(👍) 또는 잘못된 경고(👎)로 표시하면, 어떤 검사가 지나치게 "
+              "많이 표시하는지 이 요약에서 보여 줍니다.",
+        "pt": "Ainda não há votos. No app, marque cada trecho com problema como problema real (👍) ou alarme falso (👎); este "
+              "resumo mostra então quais verificações sinalizam demais.",
+        "es": "Todavía no hay votos. En la app, marca cada tramo con problemas como problema real (👍) o falsa alarma (👎); "
+              "este resumen muestra luego qué comprobaciones marcan de más.",
+    },
+    "f.totals": {
+        "en": "{n} intervals reviewed: {real} real problems, {false} false alarms ({pct}% confirmed).",
+        "ko": "검토한 구간 {n}개: 실제 문제 {real}개, 잘못된 경고 {false}개(확인율 {pct}%).",
+        "pt": "{n} trechos revisados: {real} problemas reais, {false} alarmes falsos ({pct}% confirmados).",
+        "es": "{n} tramos revisados: {real} problemas reales, {false} falsas alarmas ({pct}% confirmados).",
+    },
+    "f.check": {"en": "Check", "ko": "검사", "pt": "Verificação", "es": "Comprobación"},
+    "f.real": {"en": "Real problem", "ko": "실제 문제", "pt": "Problema real", "es": "Problema real"},
+    "f.false": {"en": "False alarm", "ko": "잘못된 경고", "pt": "Alarme falso", "es": "Falsa alarma"},
+    "f.confirmed": {"en": "Confirmed", "ko": "확인율", "pt": "Confirmados", "es": "Confirmados"},
+    "f.status.few": {"en": "too few votes yet", "ko": "아직 투표가 적음", "pt": "poucos votos ainda", "es": "aún pocos votos"},
+    "f.status.noisy": {"en": "flags too much: consider loosening its thresholds",
+                       "ko": "지나치게 많이 표시함: 기준 완화를 검토하세요",
+                       "pt": "sinaliza demais: considere afrouxar os limites",
+                       "es": "marca de más: considera relajar sus umbrales"},
+    "f.status.reliable": {"en": "reliable", "ko": "신뢰할 만함", "pt": "confiável", "es": "fiable"},
+    "f.vote_real": {"en": "Real problem", "ko": "실제 문제", "pt": "Problema real", "es": "Problema real"},
+    "f.vote_false": {"en": "False alarm", "ko": "잘못된 경고", "pt": "Alarme falso", "es": "Falsa alarma"},
+    "f.saved_real": {"en": "Marked as a real problem.", "ko": "실제 문제로 표시했습니다.", "pt": "Marcado como problema real.",
+                     "es": "Marcado como problema real."},
+    "f.saved_false": {"en": "Marked as a false alarm.", "ko": "잘못된 경고로 표시했습니다.", "pt": "Marcado como alarme falso.",
+                      "es": "Marcado como falsa alarma."},
 }

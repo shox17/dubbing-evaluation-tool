@@ -282,3 +282,18 @@ def test_history_page_shows_totals_pairs_and_recent_runs():
 def test_history_page_without_records_says_so():
     at = app(view="history")
     assert "No evaluations recorded yet" in all_text(at)
+
+
+def test_reviewers_can_vote_on_problem_intervals():
+    from src import feedback
+    at = app(view="results", results=make_results())
+    vote = at.button(key="vote_false_0")
+    assert vote.help == "False alarm" and vote.proto.type == "tertiary"
+    vote.click().run()
+    assert not at.exception
+    (entry,) = feedback.load()
+    assert (entry["vote"], entry["category"], entry["start"], entry["seq"]) == ("false_alarm", "timing_mismatch", 19.4, 100001)
+    assert at.button(key="vote_false_0").proto.type == "primary"     # the current vote is highlighted
+    at = app(view="compare", compare_run=compare_run())
+    at.button(key="vote_real_B_0").click().run()
+    assert [e["vote"] for e in feedback.load()] == ["false_alarm", "real"]

@@ -17,7 +17,7 @@ import streamlit as st
 
 from src.evaluate import CER_LANGS, SCHEMA_VERSION, base_lang
 from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
-from src import history, i18n, perso_api
+from src import feedback, history, i18n, perso_api
 from src.jobs import get_job, start_job
 from src.perso_api import PersoError, media_url, parse_share_url
 from src.compare import build_ranking, render_comparison_html
@@ -201,6 +201,24 @@ def seek_to(sec: Optional[float]):
     st.session_state.seek = max(0, int(sec or 0))
 
 
+def cast_vote(project: dict, interval: dict, verdict: str):
+    """Stores a reviewer's vote on a problem interval (button callback)."""
+    feedback.vote(project, interval, verdict)
+    st.toast(t("f.saved_real" if verdict == "real" else "f.saved_false"))
+
+
+def vote_buttons(col, project: dict, interval: dict, key: str, votes: dict):
+    """👍 real problem / 👎 false alarm for one problem interval; the current vote is highlighted."""
+    current = (votes.get(feedback.interval_key(project, interval)) or {}).get("vote")
+    with col.container(horizontal=True, gap="small"):
+        st.button("", key=f"vote_real_{key}", icon=":material/thumb_up:", help=t("f.vote_real"),
+                  type="primary" if current == "real" else "tertiary", on_click=cast_vote,
+                  args=(project, interval, "real"))
+        st.button("", key=f"vote_false_{key}", icon=":material/thumb_down:", help=t("f.vote_false"),
+                  type="primary" if current == "false_alarm" else "tertiary", on_click=cast_vote,
+                  args=(project, interval, "false_alarm"))
+
+
 def speech_timeline(ta: dict):
     """Chart of when the original and the dub speak, with mismatches outlined in red."""
     rows = [{"track": t("results.original"), "start": a, "end": b} for a, b in ta.get("original_speech", [])]
@@ -260,8 +278,11 @@ def render_report(rep: dict, r: dict):
     with st.container(border=True):
         if not rep["things_to_check"]:
             st.caption(t("report.no_things"))
+        votes = feedback.latest()
         for n, item in enumerate(rep["things_to_check"]):
-            c1, c2 = st.columns([2, 8], vertical_alignment="center")
+            c1, c2, c3 = st.columns([2, 7, 1.4], vertical_alignment="center")
+            if item.get("interval"):
+                vote_buttons(c3, rep["project"], item["interval"], str(n), votes)
             if item["start"] is not None:
                 c1.button(fmt_time(item["start"]), key=f"seek_{n}", icon=":material/play_arrow:", type="tertiary",
                           help=t("report.jump_help"), on_click=seek_to, args=(item["start"],))
@@ -551,8 +572,10 @@ def render_comparison(run: dict):
             if Path(p.get("dubbed_video_path") or "").is_file():
                 st.video(p["dubbed_video_path"], start_time=st.session_state.get(f"seek_{dub}", 0))
             st.caption(lb[f"count_{dub}"])
+            votes = feedback.latest()
             for n, i in enumerate(comp["intervals"][dub]):
-                c1, c2 = st.columns([2, 7], vertical_alignment="center")
+                c1, c2, c3 = st.columns([2, 6, 1.6], vertical_alignment="center")
+                vote_buttons(c3, comp["reports"][dub]["project"], i, f"{dub}_{n}", votes)
                 c1.button(f"{i['start']:.1f}s", key=f"seek_{dub}_{n}", icon=":material/play_arrow:", type="tertiary",
                           help=t("report.jump_help"), on_click=seek_dub, args=(dub, i["start"]))
                 color = "red" if i["severity"] == "poor" else "orange"
@@ -616,7 +639,7 @@ def render_history():
     order = [t("verdict.good"), t("verdict.check"), t("verdict.poor")]
     rows = [{"week": w["week"], "verdict": t(f"verdict.{lv}"), "dubs": w[lv]}
             for w in summary["weekly"] for lv in ("good", "check", "poor") if w[lv]]
-    st.markdown(f"**:material/bar_chart: {t('h.weekly')}**")
+    st.markdown(f"**:material/bar_chart: {t('h.weekly_chart')}**")
     st.vega_lite_chart({"data": {"values": rows}, "mark": {"type": "bar", "cornerRadius": 2},
                         "encoding": {"x": {"field": "week", "type": "ordinal", "title": t("h.week")},
                                      "y": {"field": "dubs", "type": "quantitative", "title": t("h.dubs")},
@@ -637,6 +660,17 @@ def render_history():
                      hide_index=True, width="stretch")
     else:
         st.caption(t("h.no_problems"))
+    fb = feedback.summarize(feedback.load())
+    st.markdown(f"**:material/thumbs_up_down: {t('f.title')}**")
+    if fb["intervals"]:
+        st.caption(t("f.totals", n=fb["intervals"], real=fb["real"], false=fb["false_alarm"],
+                     pct=f"{fb['confirmed_pct']:.0f}"))
+        st.dataframe(pd.DataFrame([(t("r.m." + c["check"]), c["real"], c["false_alarm"], f"{c['confirmed_pct']:.0f}%",
+                                    t("f.status." + c["status"])) for c in fb["checks"]],
+                                  columns=[t("f.check"), t("f.real"), t("f.false"), t("f.confirmed"), ""]),
+                     hide_index=True, width="stretch")
+    else:
+        st.caption(t("f.empty"))
     st.markdown(f"**:material/history: {t('h.recent')}**")
     st.dataframe(pd.DataFrame([(r["time"][:16], t("verdict." + r["verdict"]), r["title"], r["languages"], r["mode"])
                                for r in summary["recent"]],

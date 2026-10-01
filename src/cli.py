@@ -4,6 +4,7 @@
     python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
     python qa.py batch links.txt --out ./output/batch       (one link per line, optionally ",good|check|poor")
     python qa.py history --days 30                          (every past evaluation: totals, language pairs, trends)
+    python qa.py feedback                                   (reviewers' votes: which checks raise false alarms)
 
 Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
 mode saves comparison.* plus report_A.* and report_B.*.
@@ -97,6 +98,17 @@ def parse_history_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+def parse_feedback_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for the reviewer-feedback summary."""
+    ap = argparse.ArgumentParser(prog="qa.py feedback", description="Summarize reviewers' votes on problem intervals: "
+                                 "per check, how many flags were real problems and how many false alarms.")
+    ap.add_argument("--lang", choices=LANGS, default="ko", help="Language (default ko)")
+    ap.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    args = ap.parse_args(argv)
+    args.mode, args.verbose = "feedback", True
+    return args
+
+
 @contextlib.contextmanager
 def quiet_native_stderr(enabled: bool):
     """Sends C++ library logs (MediaPipe writes straight to fd 2) to the null device; yields a stream for our messages."""
@@ -135,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     use_utf8_console()
     argv = sys.argv[1:] if argv is None else argv
-    parsers = {"compare": parse_compare_args, "batch": parse_batch_args, "history": parse_history_args}
+    parsers = {"compare": parse_compare_args, "batch": parse_batch_args, "history": parse_history_args,
+               "feedback": parse_feedback_args}
     args = parsers[argv[0]](argv[1:]) if argv[:1] and argv[0] in parsers else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
@@ -184,6 +197,12 @@ def _run(args: argparse.Namespace, err) -> int:
     """The evaluation or comparison itself, printing progress and errors to err."""
     if args.mode == "history":
         return _run_history(args, err)
+    if args.mode == "feedback":
+        from src import feedback
+        summary = feedback.summarize(feedback.load())
+        print(json.dumps(summary, ensure_ascii=False, indent=2) if args.json
+              else feedback.render_feedback_text(summary, args.lang))
+        return 0
     script = getattr(args, "script", None)
     if getattr(args, "script_file", None):
         try:
