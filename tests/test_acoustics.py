@@ -56,3 +56,12 @@ def test_language_windows_skip_silence_and_report_each_window(monkeypatch):
     assert [(w["start"], w["end"], w["language"]) for w in out] == [(0.0, 10.0, "ko"), (10.0, 20.0, "en")]
     assert out[1]["expected_probability"] == 0.1 and seen == [160000, 160000]
     assert evaluate.language_windows(y, None, speech, None) == []   # no Whisper model for the language
+
+
+def test_language_windows_count_overlapping_speech_once(monkeypatch):
+    from src import evaluate
+    monkeypatch.setattr(evaluate, "_language_probs", lambda chunk, model: {"ko": 0.9, "en": 0.1})
+    y = np.zeros(16000 * 10, dtype=np.float32)
+    # Original and dub speak over the same 2 s: 2 s of speech, not 4, so the window is skipped.
+    assert evaluate.language_windows(y, None, [[1.0, 3.0], [1.0, 3.0]], "ko") == []
+    assert len(evaluate.language_windows(y, None, [[1.0, 3.0], [2.5, 5.0]], "ko")) == 1

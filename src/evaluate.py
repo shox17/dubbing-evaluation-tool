@@ -211,11 +211,19 @@ def language_windows(y: np.ndarray, whisper_model, speech: list[list[float]], ex
     """The dub's language window by window, so a part left in the original language (or another one) is found.
 
     Each window with enough speech gets Whisper's top language, its probability and the expected language's
-    probability. Windows widen on long videos so at most LANG_MAX_WINDOWS are checked.
+    probability. Windows widen on long videos so at most LANG_MAX_WINDOWS are checked. speech should include the
+    original's speech times: a dub in the wrong language transcribes badly, so its own speech times are unreliable.
     """
     duration = len(y) / sr if sr else 0.0
     if not expected or duration <= 0:
         return []
+    merged: list[list[float]] = []
+    for s, e in sorted([s, e] for s, e in speech if e > s):
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    speech = merged
     width = max(LANG_WINDOW_SEC, duration / LANG_MAX_WINDOWS)
     windows, start = [], 0.0
     while start < duration:
@@ -588,8 +596,8 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
     step("Checking the dub's language part by part...", 0.67)
-    lang_windows = cached(f"langwin|{whisper_model_name}|{stt_lang}|{dub_id}",
-                          lambda: language_windows(y_dub, model(), dub_speech, stt_lang))
+    lang_windows = cached(f"langwin2|{whisper_model_name}|{stt_lang}|{dub_id}",
+                          lambda: language_windows(y_dub, model(), orig_speech + dub_speech, stt_lang))
     integrity = video_integrity(original_video_path, dubbed_video_path)
 
     if include_lipsync:
