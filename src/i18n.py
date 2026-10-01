@@ -60,6 +60,18 @@ TEXT = {
     "stage.evaluate": {"en": "Measure quality", "ko": "품질 측정", "pt": "Medir a qualidade", "es": "Medir la calidad"},
     "stage.dub_a": {"en": "Evaluate dub A", "ko": "더빙 A 평가", "pt": "Avaliar a dublagem A", "es": "Evaluar el doblaje A"},
     "stage.dub_b": {"en": "Evaluate dub B", "ko": "더빙 B 평가", "pt": "Avaliar a dublagem B", "es": "Evaluar el doblaje B"},
+    "stage.dub_c": {"en": "Evaluate dub C", "ko": "더빙 C 평가", "pt": "Avaliar a dublagem C",
+                    "es": "Evaluar el doblaje C"},
+    "stage.dub_d": {"en": "Evaluate dub D", "ko": "더빙 D 평가", "pt": "Avaliar a dublagem D",
+                    "es": "Evaluar el doblaje D"},
+    "stage.dub_e": {"en": "Evaluate dub E", "ko": "더빙 E 평가", "pt": "Avaliar a dublagem E",
+                    "es": "Evaluar el doblaje E"},
+    "stage.dub_f": {"en": "Evaluate dub F", "ko": "더빙 F 평가", "pt": "Avaliar a dublagem F",
+                    "es": "Evaluar el doblaje F"},
+    "stage.dub_g": {"en": "Evaluate dub G", "ko": "더빙 G 평가", "pt": "Avaliar a dublagem G",
+                    "es": "Evaluar el doblaje G"},
+    "stage.dub_h": {"en": "Evaluate dub H", "ko": "더빙 H 평가", "pt": "Avaliar a dublagem H",
+                    "es": "Evaluar el doblaje H"},
     "stage.batch": {"en": "Evaluate every link", "ko": "모든 링크 평가", "pt": "Avaliar todos os links",
                     "es": "Evaluar todos los enlaces"},
     "stage.compare": {"en": "Compare and recommend", "ko": "비교 및 추천", "pt": "Comparar e recomendar",
@@ -72,8 +84,8 @@ TEXT = {
     # ----- progress page -----
     "progress.title": {"en": "Evaluating the dub", "ko": "더빙 평가 중", "pt": "Avaliando a dublagem",
                        "es": "Evaluando el doblaje"},
-    "progress.title_compare": {"en": "Evaluating both dubs", "ko": "두 더빙 평가 중", "pt": "Avaliando as duas dublagens",
-                               "es": "Evaluando los dos doblajes"},
+    "progress.title_compare": {"en": "Evaluating the dubs", "ko": "더빙 평가 중", "pt": "Avaliando as dublagens",
+                               "es": "Evaluando los doblajes"},
     "progress.overall": {"en": "Overall", "ko": "전체", "pt": "Total", "es": "Total"},
     "progress.elapsed": {"en": "Elapsed", "ko": "경과 시간", "pt": "Tempo decorrido", "es": "Tiempo transcurrido"},
     "progress.stop": {"en": "Stop waiting", "ko": "기다리기 중지", "pt": "Parar de esperar", "es": "Dejar de esperar"},
@@ -323,15 +335,17 @@ TEXT = {
     "compare.title": {"en": "① Paste two Perso share links", "ko": "① Perso 공유 링크 두 개 붙여넣기",
                       "pt": "① Cole dois links de compartilhamento da Perso", "es": "① Pega dos enlaces compartidos de Perso"},
     "compare.caption": {
-        "en": "Two dubs of the same video (for example two versions, or with and without lip-sync). Both are measured "
-              "the same way, and the tool recommends which one to deliver and explains why.",
-        "ko": "같은 영상의 더빙 두 개를 넣으세요(예: 두 가지 버전, 립싱크 있음/없음). 두 더빙을 같은 방식으로 측정하고 "
-              "어느 쪽을 납품할지 추천하며 이유를 설명합니다.",
-        "pt": "Duas dublagens do mesmo vídeo (por exemplo, duas versões, ou com e sem sincronização labial). As duas são "
-              "medidas do mesmo jeito, e a ferramenta recomenda qual entregar e explica por quê.",
-        "es": "Dos doblajes del mismo video (por ejemplo, dos versiones, o con y sin sincronización labial). Los dos se "
-              "miden igual, y la herramienta recomienda cuál entregar y explica por qué.",
+        "en": "Two or more dubs of the same video (for example versions, or with and without lip-sync). All are "
+              "measured the same way, and the tool ranks them, recommends which one to deliver and explains why.",
+        "ko": "같은 영상의 더빙을 두 개 이상 넣으세요(예: 여러 버전, 립싱크 있음/없음). 모두 같은 방식으로 측정해 순위를 "
+              "매기고, 어느 쪽을 납품할지 추천하며 이유를 설명합니다.",
+        "pt": "Duas ou mais dublagens do mesmo vídeo (por exemplo, versões, ou com e sem sincronização labial). Todas "
+              "são medidas do mesmo jeito, e a ferramenta as classifica, recomenda qual entregar e explica por quê.",
+        "es": "Dos o más doblajes del mismo video (por ejemplo, versiones, o con y sin sincronización labial). Todos se "
+              "miden igual, y la herramienta los clasifica, recomienda cuál entregar y explica por qué.",
     },
+    "compare.add": {"en": "Add another dub", "ko": "더빙 추가", "pt": "Adicionar outra dublagem", "es": "Añadir otro doblaje"},
+    "compare.remove": {"en": "Remove the last", "ko": "마지막 더빙 빼기", "pt": "Remover a última", "es": "Quitar el último"},
     "compare.start": {"en": "Evaluate and compare", "ko": "평가하고 비교하기", "pt": "Avaliar e comparar",
                       "es": "Evaluar y comparar"},
     "compare.same_link": {
@@ -431,8 +445,8 @@ MESSAGES = {
     "Comparing the dub voice with the original speakers...": {"ko": "더빙 목소리를 원래 화자와 비교 중...",
                                                               "pt": "Comparando a voz da dublagem com os falantes originais...",
                                                               "es": "Comparando la voz del doblaje con los hablantes originales..."},
-    "Comparing the two dubs...": {"ko": "두 더빙 비교 중...", "pt": "Comparando as duas dublagens...",
-                                  "es": "Comparando los dos doblajes..."},
+    "Comparing the dubs...": {"ko": "더빙 비교 중...", "pt": "Comparando as dublagens...",
+                              "es": "Comparando los doblajes..."},
     "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {
         "ko": "이 공유 링크에는 원본 영상이 없습니다. 명령줄에서 --original <파일 또는 URL>로 원본을 지정한 뒤 다시 시도하세요.",
         "pt": "Este link não tem o vídeo original. Informe o original com --original <arquivo ou URL> (linha de comando) "

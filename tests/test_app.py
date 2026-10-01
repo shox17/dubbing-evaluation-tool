@@ -234,3 +234,66 @@ def test_comparison_page_follows_the_interface_language_and_warns_when_both_are_
     text = all_text(at)
     assert at.title[0].value == "더빙 비교" and "**1. 추천 버전**" in text
     assert "두 더빙 모두 납품할 준비가 되지 않았습니다" in text and "**먼저 고칠 것**" in text
+
+
+def test_compare_tab_can_add_and_remove_dubs(shared):
+    from fake_perso import SHARE_URL_B
+    at = app()
+    assert at.button(key="remove_dub").disabled
+    at.button(key="add_dub").click().run()
+    assert not at.exception and at.session_state["compare_n"] == 3
+    at.text_input(key="share_url_a").set_value(SHARE_URL).run()
+    at.text_input(key="share_url_b").set_value(SHARE_URL_B).run()
+    assert at.button(key="start_compare").disabled                  # dub C still empty
+    at.button(key="remove_dub").click().run()
+    assert at.session_state["compare_n"] == 2 and not at.button(key="start_compare").disabled
+
+
+def test_comparison_page_with_three_dubs_shows_the_ranking():
+    from src.compare import build_ranking
+    a, b, c = make_results(acoustic_metrics={"dubbed_duration_sec": 40.0}), make_results(), make_results()
+    for r, seq in ((b, 100002), (c, 100003)):
+        r["pipeline"]["share"].update(seq=seq)
+    run = {"comparison": build_ranking([a, b, c], "en", run_seconds=5.0), "results": {"A": a, "B": b, "C": c},
+           "files": {}}
+    at = app(view="compare", compare_run=run)
+    assert not at.exception
+    text = all_text(at)
+    assert "Deliver Dub B." in text and "**Ranking:** 1. Dub B" in text and "3. Dub A" in text
+    assert at.button(key="seek_C_0").label == "19.4s"
+
+
+def test_history_page_shows_totals_pairs_and_recent_runs():
+    from src import history
+    from src.report import build_report
+    for sections in ({}, {"acoustic_metrics": {"dubbed_duration_sec": 40.0}}):
+        r = make_results(**sections)
+        r["report"] = build_report(r)
+        history.record(r, "single")
+    at = app()
+    at.button(key="open_history").click().run()
+    assert not at.exception and at.title[0].value == "Evaluation history"
+    assert "2 runs on 1 dubs" in all_text(at)                         # same link twice: counts once
+    assert len(at.dataframe) == 3                                       # pairs, problems, recent
+    at.selectbox(key="history_days").set_value(7).run()
+    assert not at.exception
+
+
+def test_history_page_without_records_says_so():
+    at = app(view="history")
+    assert "No evaluations recorded yet" in all_text(at)
+
+
+def test_reviewers_can_vote_on_problem_intervals():
+    from src import feedback
+    at = app(view="results", results=make_results())
+    vote = at.button(key="vote_false_0")
+    assert vote.help == "False alarm" and vote.proto.type == "tertiary"
+    vote.click().run()
+    assert not at.exception
+    (entry,) = feedback.load()
+    assert (entry["vote"], entry["category"], entry["start"], entry["seq"]) == ("false_alarm", "timing_mismatch", 19.4, 100001)
+    assert at.button(key="vote_false_0").proto.type == "primary"     # the current vote is highlighted
+    at = app(view="compare", compare_run=compare_run())
+    at.button(key="vote_real_B_0").click().run()
+    assert [e["vote"] for e in feedback.load()] == ["false_alarm", "real"]

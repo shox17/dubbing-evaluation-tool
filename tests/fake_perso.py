@@ -27,6 +27,13 @@ SHARED_PROJECT_B = {**SHARED_PROJECT, "seq": 100002, "title": "QA sample.mp4 →
                     "lipSyncFileUrl": "/perso-storage/u/2026_09/p-100002/QA_ko_v2_Lip-syncedVideo.mp4"}
 
 
+SHARE_TOKEN_C = "TESTshareTOKENcccccccccccccccccccccccccccccccccccccccccccccccccc"
+SHARE_URL_C = f"https://perso.ai/en/share/video-translator?seq={SHARE_TOKEN_C}"
+SHARED_PROJECT_C = {**SHARED_PROJECT, "seq": 100003, "title": "QA sample.mp4 → ko (v3)",
+                    "translatedFileUrl": "/perso-storage/u/2026_09/p-100003/QA_ko_v3_TranslatedVideo.mp4",
+                    "lipSyncFileUrl": "/perso-storage/u/2026_09/p-100003/QA_ko_v3_Lip-syncedVideo.mp4"}
+
+
 class FakeResponse:
     """Minimal stand-in for requests.Response (status, JSON body, raw bytes)."""
     def __init__(self, status: int = 200, body=None, raw: Optional[bytes] = None):

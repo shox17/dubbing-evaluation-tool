@@ -16,9 +16,10 @@ deliver, with the reason.
 4. `src/report.py` turns everything into a report: a verdict (Good / Needs review / Poor), every measure with a
    level, a plain explanation and how it's graded, and every issue as a **problem interval** (`src/intervals.py`).
    Saved as `report.html`, `report.json` and `report.txt`, in English, Korean, Portuguese or Spanish.
-5. Compare mode (`src/compare.py`) runs steps 1–4 for links A and B, applies the decision rule (better verdict →
-   fewer Poor → fewer Check → less problem time → higher meaning score → higher speech timing; tie → A) and writes
-   `comparison.txt/.json/.html` (recommended version, problem intervals, reasoning first) plus `report_A/B.*`.
+5. Compare mode (`src/compare.py`) runs steps 1–4 for 2 to 8 links (A, B, C, ...), ranks them with the decision rule
+   (better verdict → fewer Poor → fewer Check → less problem time → higher meaning score → higher speech timing;
+   still tied → input order) and writes `comparison.txt/.json/.html` (recommended version, problem intervals,
+   reasoning first) plus `report_A.*`, `report_B.*`, ...
 
 Deeper docs: `README.md` (use), `docs/ARCHITECTURE.md` (modules, results schema), `docs/METRICS.md` (how each
 measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification, open items).
@@ -28,8 +29,10 @@ measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification,
 source eval_env/bin/activate                                   # Windows: eval_env\Scripts\activate
 python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report (Korean by default) + report.* in ./output
 python qa.py "<link>" --out ./output --lang en                 # another folder / language (ko | en | es | pt)
-python qa.py compare "<link A>" "<link B>" --out ./output       # compare two dubs, recommend one
+python qa.py compare "<link A>" "<link B>" [<C> ...] --out ./output  # rank 2-8 dubs, recommend one
 python qa.py batch links.txt --out ./output/batch                # many links → summary.csv (+ agreement with your labels)
+python qa.py history --days 30                                    # every past evaluation: totals, pairs, trends
+python qa.py feedback                                             # reviewer votes: which checks raise false alarms
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
@@ -38,7 +41,7 @@ pytest                                                         # ~20 s, adds rea
 Other CLI options (both modes): `--original <file or URL>` (link without an original), `--no-cache`, `--no-lipsync`,
 `--no-translation-check`, `--whisper-model small`, `--verbose` (show MediaPipe logs). Single mode only: `--script "…"`
 / `--script-file f.txt`, `--fail-on poor|check`. Exit codes: 0 done (compare: recommended dub is Good or Needs
-review), 1 single: verdict failed `--fail-on` / compare: both dubs Poor, 2 input or runtime error (batch: any link
+review), 1 single: verdict failed `--fail-on` / compare: every dub Poor, 2 input or runtime error (batch: any link
 failed; the summary is still written).
 
 ## Setting up a new machine
@@ -72,6 +75,8 @@ src/compare.py           Compare mode: facts, decide (the rule), build_compariso
 src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
 src/voice_quality.py     Voice quality: DNSMOS P.835 on both tracks at the same moments, where both speak (ONNX)
 src/speaker.py           Voice similarity: WeSpeaker ONNX (downloaded once, SHA-256 pinned), numpy Kaldi fbank
+src/feedback.py          Reviewer votes (real problem / false alarm) per interval; per-check summary
+src/history.py           Records every evaluation to data/history.jsonl; summarize() and the history text view
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
@@ -85,6 +90,8 @@ tests/data/sample.mp4    Local only (git-ignored): any ~30 s English talking-hea
 data/output/             App run folders and results.json, created at run time (git-ignored)
 data/cache/              Per share link: downloaded videos + whisper_cache.json (git-ignored)
 output/                  The CLI's default --out folder (git-ignored)
+data/history.jsonl       Evaluation history, one JSON line per evaluated dub (git-ignored)
+data/feedback.jsonl      Reviewer votes on problem intervals (git-ignored)
 ```
 
 ## Rules
@@ -94,6 +101,10 @@ output/                  The CLI's default --out folder (git-ignored)
   keys). Reference: https://developers.perso.ai/llms.txt.
 - **Secrets:** never print, log, commit or read the values of `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`; they live
   in the git-ignored `.env`. Send the Gemini key only in the `x-goog-api-key` header, never in a URL.
+- **History recording never fails a run** (errors are logged); tests write history and votes to temp files
+  (`tests/conftest.py`).
+- **Calibrate with evidence:** reviewer votes (`qa.py feedback`) and batch labels (`qa.py batch`) are how thresholds
+  should change; a check marked "flags too much" is the first candidate.
 - **Tests never call real services.** Perso: `tests/fake_perso.py`. Gemini/Claude: `tests/conftest.py` removes
   provider keys from the environment and stubs the pipeline's translation check; judge tests use fake sessions
   and clients. Keep it that way.
@@ -105,8 +116,8 @@ output/                  The CLI's default --out folder (git-ignored)
   thresholds in `src/intervals.py`, and the compare decision rule only in `src/compare.py` (`RULES`). The UI and
   CLI render reports and comparisons; they never re-derive levels or decisions. Every Good/Check/Poor row states
   how it's graded.
-- **The decision rule is deterministic and printed:** rule order, "skip a rule when a value is missing", tie → A,
-  and the both-Poor warning are part of the spec; change them only together with `c.rule.*` / `c.why.*` texts,
+- **The decision rule is deterministic and printed:** rule order, "skip a rule when any dub lacks its value", ties
+  keep input order, the reasoning compares #1 with #2, and the all-Poor warning are part of the spec; change them only together with `c.rule.*` / `c.why.*` texts,
   `c.rules_order`, `tests/test_compare.py`, README and this file.
 - **Any language pair:** the dub language comes from the share metadata (base code: `es-MX` → `es`). A language
   without a pace rule (`SPEECH_RATE`) or without a Whisper model is "not measured" with the reason, never graded

@@ -305,7 +305,10 @@ def _things_to_check(tr: Tr, r: dict, found: dict) -> list[dict]:
     """Timestamped places a person should look at, in time order: problem intervals, probable recognition
     errors (listed, never counted) and general warnings without a time."""
     items = [{"start": i["start"], "end": i["end"], "category": i["category_label"], "severity": i["severity"],
-              "message": i["description"]} for i in found["intervals"] + found["possible_asr_errors"]]
+              "message": i["description"],
+              # the interval itself, so reviewers can vote on it (probable recognition errors aren't counted, so no vote)
+              "interval": None if i.get("asr") else {k: i[k] for k in ("category", "check", "start", "end", "severity")}}
+             for i in found["intervals"] + found["possible_asr_errors"]]
     for w in r.get("warnings", []):
         text = tr(w["key"], **w.get("params", {})) if isinstance(w, dict) else str(w)
         items.append({"start": None, "end": None, "category": tr("r.cat.general"), "severity": "check", "message": text})

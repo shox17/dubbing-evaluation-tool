@@ -3,6 +3,8 @@
     python qa.py "<share link>" --out ./output --lang ko
     python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
     python qa.py batch links.txt --out ./output/batch       (one link per line, optionally ",good|check|poor")
+    python qa.py history --days 30                          (every past evaluation: totals, language pairs, trends)
+    python qa.py feedback                                   (reviewers' votes: which checks raise false alarms)
 
 Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
 mode saves comparison.* plus report_A.* and report_B.*.
@@ -64,6 +66,7 @@ def parse_compare_args(argv: list[str]) -> argparse.Namespace:
                                  "recommend which one to deliver, and explain why.")
     ap.add_argument("url_a", help="Share link of dub A")
     ap.add_argument("url_b", help="Share link of dub B")
+    ap.add_argument("more", nargs="*", metavar="url_c", help="More share links (dubs C, D, ...; up to 8 in all)")
     _common(ap)
     args = ap.parse_args(argv)
     args.mode = "compare"
@@ -79,6 +82,30 @@ def parse_batch_args(argv: list[str]) -> argparse.Namespace:
     _common(ap)
     args = ap.parse_args(argv)
     args.mode = "batch"
+    return args
+
+
+def parse_history_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for the history view."""
+    ap = argparse.ArgumentParser(prog="qa.py history", description="Summarize every past evaluation: totals, verdicts "
+                                 "per language pair, the most frequent problems and a weekly trend.")
+    ap.add_argument("--days", type=int, help="Only the last N days")
+    ap.add_argument("--lang", choices=LANGS, default="ko", help="Language (default ko)")
+    ap.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    ap.add_argument("--csv", help="Also write every recorded evaluation to this CSV file")
+    args = ap.parse_args(argv)
+    args.mode, args.verbose = "history", True
+    return args
+
+
+def parse_feedback_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for the reviewer-feedback summary."""
+    ap = argparse.ArgumentParser(prog="qa.py feedback", description="Summarize reviewers' votes on problem intervals: "
+                                 "per check, how many flags were real problems and how many false alarms.")
+    ap.add_argument("--lang", choices=LANGS, default="ko", help="Language (default ko)")
+    ap.add_argument("--json", action="store_true", help="Print the summary as JSON")
+    args = ap.parse_args(argv)
+    args.mode, args.verbose = "feedback", True
     return args
 
 
@@ -115,12 +142,13 @@ def use_utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Runs one evaluation or a comparison. Exit codes: 0 done, 1 see below, 2 input or runtime error.
 
-    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when both dubs are Poor. Batch mode: 0 when every
+    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when every dub is Poor. Batch mode: 0 when every
     link was evaluated, 2 when any link failed (the summary is written either way).
     """
     use_utf8_console()
     argv = sys.argv[1:] if argv is None else argv
-    parsers = {"compare": parse_compare_args, "batch": parse_batch_args}
+    parsers = {"compare": parse_compare_args, "batch": parse_batch_args, "history": parse_history_args,
+               "feedback": parse_feedback_args}
     args = parsers[argv[0]](argv[1:]) if argv[:1] and argv[0] in parsers else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
@@ -147,8 +175,34 @@ def _progress(err):
     return progress
 
 
+def _run_history(args: argparse.Namespace, err) -> int:
+    """Prints the history summary (and writes the CSV when asked)."""
+    import csv
+    from src import history
+    records = history.load()
+    summary = history.summarize(records, days=args.days)
+    print(json.dumps(summary, ensure_ascii=False, indent=2) if args.json else history.render_history_text(summary, args.lang))
+    if args.csv:
+        fields = ["time", "mode", "title", "languages", "language_pair", "lipsync", "verdict", "poor", "check",
+                  "problem_seconds", "meaning_score", "overlap_pct", "link", "seq", "tool_version", "report"]
+        with open(args.csv, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(records)
+        print(f"\nSaved: {args.csv}", file=err)
+    return 0
+
+
 def _run(args: argparse.Namespace, err) -> int:
     """The evaluation or comparison itself, printing progress and errors to err."""
+    if args.mode == "history":
+        return _run_history(args, err)
+    if args.mode == "feedback":
+        from src import feedback
+        summary = feedback.summarize(feedback.load())
+        print(json.dumps(summary, ensure_ascii=False, indent=2) if args.json
+              else feedback.render_feedback_text(summary, args.lang))
+        return 0
     script = getattr(args, "script", None)
     if getattr(args, "script_file", None):
         try:
@@ -165,7 +219,7 @@ def _run(args: argparse.Namespace, err) -> int:
         return _run_batch(args, options, err)
     try:
         if args.mode == "compare":
-            run = run_comparison(args.url_a, args.url_b, out_dir=args.out, **options)
+            run = run_comparison(args.url_a, args.url_b, out_dir=args.out, more_urls=tuple(args.more), **options)
         else:
             results = run_share_evaluation(args.share_url, ground_truth_text=script, out_dir=args.out, **options)
     except (ValueError, FileNotFoundError, PersoError) as e:
@@ -184,7 +238,7 @@ def _run(args: argparse.Namespace, err) -> int:
         print(json.dumps({k: v for k, v in comp.items() if k != "reports"}, ensure_ascii=False, indent=2)
               if args.json else render_comparison_text(comp))
         print("\nSaved: " + "\n       ".join(run["files"][k] for k in ("text", "html", "json")), file=err)
-        return 1 if comp["recommendation"]["both_poor"] else 0
+        return 1 if comp["recommendation"]["all_poor"] else 0
 
     rep = results["report"]
     print(json.dumps(rep, ensure_ascii=False, indent=2) if args.json else render_text(rep))

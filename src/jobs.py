@@ -16,6 +16,12 @@ STAGES = [
     ("evaluate", "Measure quality"),
     ("dub_a", "Evaluate dub A"),
     ("dub_b", "Evaluate dub B"),
+    ("dub_c", "Evaluate dub C"),
+    ("dub_d", "Evaluate dub D"),
+    ("dub_e", "Evaluate dub E"),
+    ("dub_f", "Evaluate dub F"),
+    ("dub_g", "Evaluate dub G"),
+    ("dub_h", "Evaluate dub H"),
     ("compare", "Compare and recommend"),
     ("batch", "Evaluate every link"),
 ]
@@ -63,7 +69,8 @@ class Job:
     @property
     def overall_fraction(self) -> float:
         """Progress across all stages, weighted by their typical share of the run time."""
-        weights = {"fetch": 0.2, "download": 1, "evaluate": 6, "dub_a": 7, "dub_b": 7, "compare": 0.2, "batch": 1}
+        weights = {"fetch": 0.2, "download": 1, "evaluate": 6, "compare": 0.2, "batch": 1,
+                   **{f"dub_{c}": 7 for c in "abcdefgh"}}
         total = sum(weights[s] for s in self.stages)
         if self.status == "done":
             return 1.0

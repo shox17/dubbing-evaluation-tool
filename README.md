@@ -4,7 +4,7 @@ Automatic quality reports for videos dubbed with **[Perso AI](https://perso.ai)*
 
 Paste a **Perso share link**, and the tool downloads the original and the dub, measures both, and writes a report: an overall **verdict**, every measure marked **Good / Check / Poor** with a plain-language explanation and the thresholds it used, and every problem as a **time range** to check. No Perso account, API key or credits are needed.
 
-**Compare mode** takes two share links (two dubs of the same video), evaluates both the same way, **recommends which one to deliver** with a fixed decision rule, and explains why.
+**Compare mode** takes 2 to 8 share links (dubs of the same video), evaluates all of them the same way, **ranks them and recommends which one to deliver** with a fixed decision rule, and explains why.
 
 ```bash
 python qa.py "https://perso.ai/en/share/video-translator?seq=…" --out ./output --lang ko
@@ -96,13 +96,14 @@ In Perso, open the dubbed video, choose **Share**, and copy the link. It looks l
 **Interface language:** English, 한국어, Português or Español (sidebar). Everything follows it: the report's explanations, verdict and things to check, Gemini's translation comments, error messages, and the downloaded HTML report. The command line takes `--lang ko` (the default), `en`, `es` or `pt`.
 
 ### Compare two dubs
-**In the app:** open the **Compare two dubs** tab, paste link A and link B (each shows a preview), and press **Evaluate and compare**. The comparison page shows the recommended version, the problem intervals of each dub next to its video (▶ jumps there), the reasoning, and every check side by side. Download it as HTML or JSON.
+**In the app:** open the **Compare two dubs** tab, paste link A and link B (each shows a preview; **Add another dub** goes up to 8), and press **Evaluate and compare**. The comparison page shows the recommended version, the problem intervals of each dub next to its video (▶ jumps there), the reasoning, and every check side by side. Download it as HTML or JSON.
 
 **On the command line:**
 ```bash
 python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
+python qa.py compare "<link A>" "<link B>" "<link C>" "<link D>"     # up to 8 dubs: a full ranking
 ```
-Both dubs go through the full pipeline. **Decision rule**, stopping at the first rule that separates them:
+Every dub goes through the full pipeline. **Decision rule**, stopping at the first rule that separates them:
 1. better overall verdict (Good > Needs review > Poor)
 2. fewer Poor items
 3. fewer Check items
@@ -110,11 +111,11 @@ Both dubs go through the full pipeline. **Decision rule**, stopping at the first
 5. higher translation meaning score (1–5)
 6. higher speech-timing alignment (%)
 
-Still tied → Dub A, and the comparison says it's a tie. A rule is skipped when a dub has no value for it (for example, no translation check), and the comparison then says the decision was made without translation. If **both dubs are Poor**, the better one is still named, with a clear "neither is ready to deliver" warning and what to fix first.
+Still tied → the earlier dub (A before B), and the comparison says it's a tie. With 3+ dubs the same rule sorts all of them into a ranking, and the reasoning explains #1 against #2. A rule is skipped when any dub has no value for it (for example, no translation check), and the comparison then says the decision was made without translation. If **every dub is Poor**, the best one is still named, with a clear "neither is ready to deliver" warning and what to fix first.
 
 `comparison.txt` and the top of `comparison.html` start with **1. Recommended version**, **2. Problem intervals** (per dub, e.g. `12.4s-15.1s | Dub B | missing speech | Poor | Translation check | The line about … is not spoken`) and **3. Reasoning** (the rule, the values for A and B, a short summary), followed by every check side by side, each link's details, measurement notes, the tool version and the run time. Probable speech-recognition errors are listed separately and never count.
 
-**Exit codes:** `0` the recommended dub is Good or Needs review · `1` both dubs are Poor · `2` input or runtime error (invalid link, sharing turned off, …).
+**Exit codes:** `0` the recommended dub is Good or Needs review · `1` every dub is Poor · `2` input or runtime error (invalid link, sharing turned off, …).
 
 ### Batch mode: many links, one summary
 ```bash
@@ -128,6 +129,17 @@ https://perso.ai/…?seq=…,good
 https://perso.ai/…?seq=…,poor
 ```
 The summary then shows how often the tool agrees with you, whether it is stricter or more lenient, and a person × tool table. Use the CSV to see which measure drove each disagreement before you change a threshold.
+
+### History and trends
+Every evaluation (app, command line, compare and batch) is added to `data/history.jsonl` on your machine. See it with **History** in the app's sidebar (period filter, weekly verdict chart, language pairs, most frequent problems, latest runs), or:
+```bash
+python qa.py history --days 30 --lang en          # summary in the terminal
+python qa.py history --csv history.csv            # every recorded evaluation as a spreadsheet
+```
+Reruns of the same link count once in the totals (the latest run wins).
+
+### Reviewer feedback
+Next to every problem interval in the app, mark it 👍 **real problem** or 👎 **false alarm** (the latest vote counts, so you can change your mind). Votes are saved in `data/feedback.jsonl`. The History page and `python qa.py feedback` then show, per check, how many flags reviewers confirmed and which checks **flag too much** (half or more false alarms, after at least 3 votes): the place to loosen a threshold.
 
 ### The command line
 ```bash
@@ -184,6 +196,8 @@ src/perso_api.py         Share links: parse the link, read the public project, d
 src/pipeline.py          Share link → download (cached) → evaluate → translation check → report files; compare mode
 src/compare.py           Compare mode: decision rule, comparison model, text and HTML renderers (pure)
 src/intervals.py         Problem intervals: collect, merge, clip, round, sort (pure)
+src/feedback.py          Reviewer votes on problem intervals and the per-check summary
+src/history.py           Evaluation history: record every run, summaries and trends
 src/batch.py             Batch mode: input file, summary rows, agreement with your verdicts (pure)
 src/version.py           Tool version printed in comparisons
 src/evaluate.py          All measurements (pure functions, no file writes)
@@ -199,6 +213,8 @@ tests/                   pytest suite; tests/fake_perso.py fakes the share endpo
                          English talking-head clip) is local test media, not in git; slow tests skip without it
 data/cache/<link>/       Downloaded videos and Whisper results per share link (not committed)
 data/output/runs/<id>/   Report files of each app run (not committed)
+data/history.jsonl       Every evaluation, one line each (not committed)
+data/feedback.jsonl      Reviewer votes on problem intervals (not committed)
 output/                  The command line's default --out folder (not committed)
 docs/                    Architecture, metrics, engineering review
 AGENTS.md                Guide and rules for AI coding agents (Codex reads it; CLAUDE.md imports it)

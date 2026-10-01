@@ -8,6 +8,11 @@ _Initial review 2026-09-25. Updated 2026-09-29: the tool evaluates a dub from it
 - **Translation check (automatic):** Gemini (or Claude) compares both timestamped transcripts for meaning, missing or added content, names and numbers, and mistranslations. Issues the model flags as probable speech-recognition errors are listed but don't change levels. Without a key it's reported as not measured; it never fails the run.
 - **Report:** a verdict (Good / Needs review / Poor) with a one-line summary, six sections where every measure has a level, a plain explanation and the thresholds used, timestamped things to check (▶ jumps both videos there in the app), and a not-measured list with reasons. Saved as `report.html` (standalone, shareable), `report.json` and `report.txt` in every run folder.
 
+## Product (2026-10-01)
+- **Rank 2–8 dubs** with the same deterministic rule (rules missing for any dub are skipped; ties keep input order; reasoning compares #1 with #2); two-dub output unchanged.
+- **History and trends**: every evaluation is appended to `data/history.jsonl`; `qa.py history` and the app's History page show totals (reruns counted once), language pairs, most frequent problems, a weekly chart and recent runs.
+- **Reviewer feedback**: 👍/👎 on every problem interval; `qa.py feedback` and the History page show per-check confirmed shares and which checks flag too much. Together with batch labels, this is the evidence loop for calibrating thresholds.
+
 ## Voice similarity (2026-10-01)
 - New measure **Voice similarity** (WeSpeaker ResNet34-LM ONNX, downloaded once with a pinned hash; numpy Kaldi filterbank so no torchaudio): each original line vs the dub at the same moment, only where the original's background is quiet; Good ≥ 50% else Check; lines much less similar than the rest become "different voice" intervals.
 - **Validated** with a synthetic two-speaker scene (English original, Spanish dub lines): good clone 0.84, stock voice 0.15, a similar wrong voice on one line and a cross-gender swap both flagged at the right line. On the two real film dubs every line had loud music under it, so it's honestly reported as not measured.
