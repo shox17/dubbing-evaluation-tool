@@ -22,7 +22,7 @@ from src.evaluate import run_full_evaluation, DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
 from src.perso_api import PersoError, download_media, get_shared_project, parse_share_url
 from src.report import build_report, render_html, render_text
-from src.translation_judge import judge_translation, not_measured
+from src.translation_judge import judge_fingerprint, judge_translation, not_measured
 
 log = logging.getLogger(__name__)
 
@@ -259,22 +259,34 @@ def evaluate_share(
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "logs": "Read from a Perso share link; videos and speech recognition are cached per link. No credits were spent.",
     }
-    check_translation(eval_results, use_translation_judge, notify)
+    check_translation(eval_results, use_translation_judge, notify, cache=JsonCache(folder / "judge_cache.json"))
     return eval_results
 
 
-def check_translation(results: dict, enabled: bool, notify: Callable[..., None]) -> None:
-    """Adds the translation check to results; any failure becomes a not-measured result, never an error."""
+def check_translation(results: dict, enabled: bool, notify: Callable[..., None], cache=None) -> None:
+    """Adds the translation check to results; any failure becomes a not-measured result, never an error.
+
+    A successful review is cached (when cache is given) under a fingerprint of both transcripts, the languages,
+    the prompt and the models, so a rerun of the same link gets the same answer without another API call.
+    Failures are never cached: the next run tries again.
+    """
     if not enabled:
         results["translation_judge"] = not_measured("r.judge.off")
         return
     notify("evaluate", "Checking the translation...", 0.96)
     sr, meta, share = results["speech_recognition"], results["metadata"], results["pipeline"]["share"]
     name = lambda label, code: f"{label} ({code})" if label and code else (label or code or "unknown")
-    results["translation_judge"] = judge_translation(
-        sr.get("original_segments") or [], sr.get("dubbed_segments") or [],
-        name(share.get("source_language_name"), meta.get("detected_source_language")),
-        name(share.get("target_language_name"), meta.get("target_language")))
+    args = (sr.get("original_segments") or [], sr.get("dubbed_segments") or [],
+            name(share.get("source_language_name"), meta.get("detected_source_language")),
+            name(share.get("target_language_name"), meta.get("target_language")))
+    key = _short_hash(json.dumps([args, judge_fingerprint()], ensure_ascii=False, sort_keys=True))
+    cached = cache.get(key) if cache is not None else None
+    if cached:
+        results["translation_judge"] = {**cached, "cached": True}
+        return
+    results["translation_judge"] = judge_translation(*args)
+    if cache is not None and results["translation_judge"].get("measured"):
+        cache[key] = results["translation_judge"]
 
 
 def _notifier(report: Optional[Callable[[Progress], None]]):

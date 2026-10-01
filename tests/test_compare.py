@@ -250,3 +250,19 @@ def test_missing_original_needs_the_original_option(isolated_output, monkeypatch
     pipeline.run_share_evaluation(SHARE_URL, original="https://portal-media.perso.ai/perso-storage/x/original/o.mp4",
                                   use_translation_judge=False, session=fake, sleep=NO_SLEEP)
     assert Path(seen["original_video_path"]).read_bytes() == fake.original_bytes            # downloaded via the URL
+
+
+# ---------------- translation-check cache ----------------
+def test_translation_check_is_cached_per_link_but_failures_are_retried(isolated_output, monkeypatch):
+    from src.translation_judge import not_measured
+    monkeypatch.setattr(pipeline, "run_full_evaluation",
+                        lambda **kw: {k: v for k, v in make_results().items() if k not in ("pipeline", "translation_judge")})
+    answers = iter([not_measured("r.judge.busy", model="Gemini"), JUDGED])
+    calls = []
+    monkeypatch.setattr(pipeline, "judge_translation", lambda *a, **k: calls.append(a) or next(answers))
+    fake = FakePerso()
+    runs = [pipeline.run_share_evaluation(SHARE_URL, session=fake, sleep=NO_SLEEP) for _ in range(3)]
+    assert len(calls) == 2                                    # busy → asked again; success → cached
+    assert runs[0]["translation_judge"]["measured"] is False
+    assert runs[1]["translation_judge"]["meaning_score"] == 5 and not runs[1]["translation_judge"].get("cached")
+    assert runs[2]["translation_judge"]["meaning_score"] == 5 and runs[2]["translation_judge"]["cached"]
