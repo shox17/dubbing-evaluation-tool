@@ -10,4 +10,6 @@ imageio-ffmpeg==0.6.0
 python-dotenv==1.2.3
 requests==2.34.2
 onnxruntime==1.30.0           # voice quality (DNSMOS model in src/models/)
+fastapi==0.142.2              # REST API (qa.py serve)
+uvicorn==0.53.0
 anthropic==1.9.0              # optional translation check (Claude); the app runs without a key

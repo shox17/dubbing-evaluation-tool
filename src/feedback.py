@@ -13,12 +13,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
+from src.paths import DATA_DIR
 from src.version import TOOL_VERSION
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FEEDBACK_FILE = Path(os.getenv("DUBBING_QA_FEEDBACK", PROJECT_ROOT / "data" / "feedback.jsonl"))
+FEEDBACK_FILE = Path(os.getenv("DUBBING_QA_FEEDBACK") or DATA_DIR / "feedback.jsonl")
 VOTES = ("real", "false_alarm")
 MIN_VOTES = 3                        # a check needs this many votes before the summary calls it noisy or reliable
 NOISY_PCT = 50.0                     # at least this share of false alarms: the check flags too much

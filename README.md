@@ -196,6 +196,8 @@ src/perso_api.py         Share links: parse the link, read the public project, d
 src/pipeline.py          Share link → download (cached) → evaluate → translation check → report files; compare mode
 src/compare.py           Compare mode: decision rule, comparison model, text and HTML renderers (pure)
 src/intervals.py         Problem intervals: collect, merge, clip, round, sort (pure)
+src/api.py               REST API (FastAPI): jobs, reports, history, feedback
+src/paths.py             Where data lives (DUBBING_QA_DATA)
 src/feedback.py          Reviewer votes on problem intervals and the per-check summary
 src/history.py           Evaluation history: record every run, summaries and trends
 src/batch.py             Batch mode: input file, summary rows, agreement with your verdicts (pure)
@@ -217,6 +219,8 @@ data/history.jsonl       Every evaluation, one line each (not committed)
 data/feedback.jsonl      Reviewer votes on problem intervals (not committed)
 output/                  The command line's default --out folder (not committed)
 docs/                    Architecture, metrics, engineering review
+Dockerfile, docker-compose.yml   Container image (app or API)
+.github/workflows/tests.yml     CI on Linux, macOS and Windows
 AGENTS.md                Guide and rules for AI coding agents (Codex reads it; CLAUDE.md imports it)
 CLAUDE.md                Imports AGENTS.md for Claude Code
 ```
@@ -232,6 +236,32 @@ CLAUDE.md                Imports AGENTS.md for Claude Code
 Open items are tracked in [docs/ENGINEERING_REVIEW.md](docs/ENGINEERING_REVIEW.md). The biggest ones are replacing the experimental lip-sync measure with a SyncNet-style model and calibrating the new bands on more dubs.
 
 ---
+
+## REST API
+```bash
+python qa.py serve                         # http://127.0.0.1:8000 · interactive docs at /docs
+```
+| Endpoint | What it does |
+|---|---|
+| `POST /evaluations` `{"link": "...", "lang": "ko"}` | starts evaluating one dub → `202 {id, url}` |
+| `POST /comparisons` `{"links": ["...", "..."]}` | starts ranking 2–8 dubs |
+| `GET /jobs/{id}` | status, progress, and once done a result summary and report links |
+| `GET /jobs/{id}/report?format=html\|json\|text` | the saved report or comparison |
+| `GET /history?days=30` · `GET /feedback` · `GET /health` | summaries and a liveness check |
+
+Jobs run in the background and are kept on disk, so ids stay valid across restarts. **Security:** without `DUBBING_QA_API_TOKEN` the server only listens on this machine; set the token to listen on the network (`--host 0.0.0.0`), and send `Authorization: Bearer <token>` with every request except `/health`.
+
+## Docker
+```bash
+docker build -t dubbing-qa .
+docker run -p 8501:8501 -v dubbing-qa-data:/data --env-file .env dubbing-qa                  # the app
+docker run --rm -v dubbing-qa-data:/data --env-file .env dubbing-qa python qa.py "<link>"     # the CLI (files in /data/output)
+docker compose up                                                                            # app; add --profile api for the API on :8000
+```
+CPU only (PyTorch CPU wheels), runs as a non-root user, Whisper and the speaker model baked in (works offline), data, history and jobs on the `/data` volume. The image is ~3.7 GB. A 60 s dub takes ~40–50 s in the container. On Linux ARM (Docker on Apple Silicon) the MediaPipe pin is relaxed to 1.x, because 0.10.x has no Linux ARM wheel for Python 3.14; the whole test suite, including the real-Whisper and lip-movement tests, passes inside the image.
+
+## Continuous integration
+`.github/workflows/tests.yml` runs the fast, offline suite on **Linux, macOS and Windows** (Python 3.14) for every push and pull request. No secrets are needed.
 
 ## Troubleshooting
 

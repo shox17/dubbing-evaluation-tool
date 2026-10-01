@@ -1,13 +1,30 @@
-"""Background jobs: a share-link evaluation (or a comparison of two) runs in a thread so the UI can show live progress, survive page
-reloads (the job id is kept in the URL) and let the user stop it."""
+"""Background jobs: an evaluation, comparison or batch runs in a thread so the UI can show live progress, survive page
+reloads (the job id is kept in the URL) and let the user stop it.
+
+Every job also keeps its state in data/jobs/<id>.json (and its result in <id>.result.json once done), so a job is
+still found after the app restarts: a finished one shows its result, one that was running when the process stopped
+is reported as interrupted.
+"""
+import os
+import re
+import json
 import time
 import uuid
 import logging
 import threading
+from pathlib import Path
+
+from src.paths import DATA_DIR
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
+
+JOBS_DIR = Path(os.getenv("DUBBING_QA_JOBS") or DATA_DIR / "jobs")
+MAX_KEPT_JOBS = 50
+SAVE_EVERY_SEC = 2.0                 # progress snapshots are written at most this often (stage changes always)
+JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+INTERRUPTED = "The app restarted while this job was running, so it stopped. Start it again."
 
 # Ordered stages shown in the UI checklist.
 STAGES = [
@@ -46,7 +63,7 @@ class Job:
     id: str
     params: dict
     stages: list[str]                               # the stages this job goes through
-    status: str = "running"                         # running | done | failed | cancelled
+    status: str = "running"                         # running | done | failed | cancelled | interrupted
     stage: str = ""
     message: str = "Starting..."
     stage_fraction: float = 0.0
@@ -57,14 +74,41 @@ class Job:
     error: Optional[str] = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _saved_at: float = 0.0
 
     def report(self, p: Progress) -> None:
         """Records a progress update from the pipeline (called from the worker thread)."""
         with self._lock:
-            if p.stage != self.stage:
+            new_stage = p.stage != self.stage
+            if new_stage:
                 self.stage_started_at = time.time()
             self.stage, self.message = p.stage, p.message
             self.stage_fraction = max(0.0, min(1.0, p.stage_fraction))
+        if new_stage or time.time() - self._saved_at >= SAVE_EVERY_SEC:
+            self.save()
+
+    def snapshot(self, status: Optional[str] = None) -> dict:
+        """The job's state as JSON-friendly data (without the result)."""
+        return {"id": self.id, "params": self.params, "stages": self.stages, "status": status or self.status,
+                "stage": self.stage, "message": self.message, "stage_fraction": self.stage_fraction,
+                "started_at": self.started_at, "stage_started_at": self.stage_started_at,
+                "finished_at": self.finished_at, "error": self.error}
+
+    def save(self, status: Optional[str] = None) -> None:
+        """Writes the state file (and the result once done); a failure is logged, never raised.
+
+        status saves a final state before it is set in memory, so a restart never finds a finished job on disk
+        still marked running.
+        """
+        self._saved_at = time.time()
+        try:
+            folder = Path(JOBS_DIR)
+            folder.mkdir(parents=True, exist_ok=True)
+            if (status or self.status) == "done" and self.result is not None:
+                _write(folder / f"{self.id}.result.json", self.result)
+            _write(folder / f"{self.id}.json", self.snapshot(status))
+        except (OSError, TypeError, ValueError) as e:
+            log.warning("Could not save job %s: %s", self.id, e)
 
     @property
     def overall_fraction(self) -> float:
@@ -98,12 +142,54 @@ class Job:
         if i < cur:
             return "done"
         if i == cur:
-            return "failed" if self.status in ("failed", "cancelled") else "active"
+            return "failed" if self.status in ("failed", "cancelled", "interrupted") else "active"
         return "pending"
 
 
 _jobs: dict[str, Job] = {}
 _registry_lock = threading.Lock()
+
+
+def _write(path: Path, data) -> None:
+    """Writes JSON atomically."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _prune(keep: Optional[int] = None) -> None:
+    """Deletes the files of all but the newest `keep` jobs (default MAX_KEPT_JOBS)."""
+    keep = MAX_KEPT_JOBS if keep is None else keep
+    folder = Path(JOBS_DIR)
+    if not folder.is_dir():
+        return
+    states = sorted(folder.glob("*[0-9a-f].json"), key=lambda f: f.stat().st_mtime, reverse=True)
+    for old in states[keep:]:
+        for f in (old, old.with_name(old.stem + ".result.json")):
+            f.unlink(missing_ok=True)
+
+
+def _load(job_id: str) -> Optional[Job]:
+    """A job from its files, or None. A job saved as running belongs to a process that is gone: interrupted."""
+    folder = Path(JOBS_DIR)
+    try:
+        state = json.loads((folder / f"{job_id}.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    job = Job(id=job_id, params=state.get("params") or {}, stages=state.get("stages") or ["evaluate"])
+    for k in ("status", "stage", "message", "stage_fraction", "started_at", "stage_started_at", "finished_at", "error"):
+        if state.get(k) is not None:
+            setattr(job, k, state[k])
+    if job.status == "running":
+        job.status, job.error = "interrupted", INTERRUPTED
+        job.finished_at = job.finished_at or state.get("stage_started_at") or job.started_at
+        job.save()
+    elif job.status == "done":
+        try:
+            job.result = json.loads((folder / f"{job_id}.result.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            job.status, job.error = "interrupted", INTERRUPTED
+    return job
 
 
 def start_job(runner: Callable[[Callable[[Progress], None], threading.Event], dict],
@@ -112,29 +198,36 @@ def start_job(runner: Callable[[Callable[[Progress], None], threading.Event], di
     job = Job(id=uuid.uuid4().hex[:12], params=params, stages=stages, stage=stages[0])
     with _registry_lock:
         _jobs[job.id] = job
+    job.save()
+    _prune()
 
     def target():
         """Thread body: runs the pipeline and stores the result, error or cancellation on the job."""
         try:
             job.result = runner(job.report, job.cancel_event)
-            job.status = "done"
-            job.message = "Finished"
+            status, job.message = "done", "Finished"
         except Exception as e:  # reported to the UI; the traceback goes to the log
             if isinstance(e, Cancelled):
-                job.status, job.error = "cancelled", "You stopped this job."
+                status, job.error = "cancelled", "You stopped this job."
             else:
                 log.exception("Job %s failed", job.id)
-                job.status, job.error = "failed", str(e)
-        finally:
-            job.finished_at = time.time()
+                status, job.error = "failed", str(e)
+        job.finished_at = time.time()
+        job.save(status)                              # on disk first, then visible: see Job.save
+        job.status = status
 
     threading.Thread(target=target, name=f"job-{job.id}", daemon=True).start()
     return job
 
 
 def get_job(job_id: Optional[str]) -> Optional[Job]:
-    """Looks up a running or finished job by id; None if unknown (for example after an app restart)."""
-    if not job_id:
+    """A job by id: from memory, else from its saved files (after an app restart); None if unknown or malformed."""
+    if not job_id or not JOB_ID_RE.match(str(job_id)):
         return None
     with _registry_lock:
-        return _jobs.get(job_id)
+        job = _jobs.get(job_id)
+        if job is None:
+            job = _load(job_id)
+            if job is not None:
+                _jobs[job_id] = job
+        return job

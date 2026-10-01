@@ -297,3 +297,16 @@ def test_reviewers_can_vote_on_problem_intervals():
     at = app(view="compare", compare_run=compare_run())
     at.button(key="vote_real_B_0").click().run()
     assert [e["vote"] for e in feedback.load()] == ["false_alarm", "real"]
+
+
+def test_a_finished_job_still_opens_its_results_after_an_app_restart():
+    from src.jobs import start_job
+    job = start_job(lambda report, cancel: make_results(), {"share_url": SHARE_URL}, ["fetch", "download", "evaluate"])
+    while job.status == "running":
+        time.sleep(0.02)
+    jobs._jobs.clear()                                   # the app process restarted
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.query_params["job"] = job.id
+    at.run()
+    at.run()
+    assert not at.exception and at.title[0].value == "Results"

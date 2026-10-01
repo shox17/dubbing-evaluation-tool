@@ -8,6 +8,12 @@ _Initial review 2026-09-25. Updated 2026-09-29: the tool evaluates a dub from it
 - **Translation check (automatic):** Gemini (or Claude) compares both timestamped transcripts for meaning, missing or added content, names and numbers, and mistranslations. Issues the model flags as probable speech-recognition errors are listed but don't change levels. Without a key it's reported as not measured; it never fails the run.
 - **Report:** a verdict (Good / Needs review / Poor) with a one-line summary, six sections where every measure has a level, a plain explanation and the thresholds used, timestamped things to check (▶ jumps both videos there in the app), and a not-measured list with reasons. Saved as `report.html` (standalone, shareable), `report.json` and `report.txt` in every run folder.
 
+## Engineering (2026-10-01)
+- **CI** on GitHub Actions: Linux, macOS and Windows, Python 3.14, fast offline suite; first run green on all three (the first real Windows verification), pinned requirements installed on every OS.
+- **Persistent jobs** in `data/jobs/`: finished jobs keep their results across restarts, running ones come back as interrupted; job ids from URLs are validated. Found and fixed a race where a finished job could be on disk as running.
+- **REST API** (`qa.py serve`, FastAPI): start evaluations/comparisons, poll jobs, fetch reports, history and feedback; localhost-only unless a token is set. Smoke-tested with curl on a real link.
+- **Docker** image (CPU torch, non-root, models baked in, `/data` volume) and compose file. Inside the image: the whole suite passes (669, incl. real Whisper and lip movement with MediaPipe 1.0.1 on Linux ARM); a real share link evaluates in 40–51 s; a finished job survives a container restart. Fixed along the way: missing EGL/PortAudio libraries, a root-owned `/data` volume, and an unwritable default `--out` in the container.
+
 ## Product (2026-10-01)
 - **Rank 2–8 dubs** with the same deterministic rule (rules missing for any dub are skipped; ties keep input order; reasoning compares #1 with #2); two-dub output unchanged.
 - **History and trends**: every evaluation is appended to `data/history.jsonl`; `qa.py history` and the app's History page show totals (reruns counted once), language pairs, most frequent problems, a weekly chart and recent runs.

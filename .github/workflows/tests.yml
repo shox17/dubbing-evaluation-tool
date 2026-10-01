@@ -1,0 +1,54 @@
+# Runs the fast, offline test suite on Linux, macOS and Windows for every push and pull request.
+# Tests never call Perso, Gemini or Claude and never download models (see tests/conftest.py), so no secrets are needed.
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      PYTHONUTF8: "1"                 # Windows consoles default to a legacy code page
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Linux libraries for OpenCV / MediaPipe
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
+      - name: Install (pinned, else unpinned)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # The pins were verified on macOS arm64; if one has no wheel for this platform, fall back to the
+          # unpinned list from AGENTS.md so the suite still runs (and says so in the log).
+          pip install -r requirements-dev.txt || {
+            echo "::warning::Pinned install failed on ${{ runner.os }}; installing unpinned."
+            pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv \
+                        requests onnxruntime anthropic fastapi uvicorn httpx pytest
+          }
+
+      - name: Fast tests
+        run: python -m pytest -m "not slow" -q

@@ -33,6 +33,8 @@ python qa.py compare "<link A>" "<link B>" [<C> ...] --out ./output  # rank 2-8 
 python qa.py batch links.txt --out ./output/batch                # many links → summary.csv (+ agreement with your labels)
 python qa.py history --days 30                                    # every past evaluation: totals, pairs, trends
 python qa.py feedback                                             # reviewer votes: which checks raise false alarms
+python qa.py serve                                                # REST API on 127.0.0.1:8000 (docs at /docs)
+docker build -t dubbing-qa . && docker run -p 8501:8501 -v dubbing-qa-data:/data dubbing-qa   # container
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
@@ -52,7 +54,7 @@ printf 'GEMINI_API_KEY=%s\n' "<key>" > .env  # optional: turns on the translatio
 pytest -m "not slow"
 ```
 - If `pip install` fails on another Python version, install unpinned:
-  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests onnxruntime anthropic pytest`.
+  `pip install streamlit openai-whisper librosa jiwer mediapipe numpy pandas imageio-ffmpeg python-dotenv requests onnxruntime fastapi uvicorn anthropic pytest httpx`.
 - The first evaluation downloads the Whisper `base` model (~145 MB) to `~/.cache/whisper`. Run one evaluation
   before a demo so the download is done.
 - `.env` is git-ignored; a fresh clone has none. Without a key everything works except the translation check,
@@ -75,12 +77,14 @@ src/compare.py           Compare mode: facts, decide (the rule), build_compariso
 src/batch.py             Batch mode: parse links file (+ person's verdicts), summary rows, agreement, CSV/text (pure)
 src/voice_quality.py     Voice quality: DNSMOS P.835 on both tracks at the same moments, where both speak (ONNX)
 src/speaker.py           Voice similarity: WeSpeaker ONNX (downloaded once, SHA-256 pinned), numpy Kaldi fbank
+src/api.py               REST API (FastAPI) over the same job runner; token auth when DUBBING_QA_API_TOKEN is set
+src/paths.py             DATA_DIR (DUBBING_QA_DATA, default ./data): output, cache, history, votes, jobs
 src/feedback.py          Reviewer votes (real problem / false alarm) per interval; per-check summary
 src/history.py           Records every evaluation to data/history.jsonl; summarize() and the history text view
 src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
-src/jobs.py              Background job thread + Progress model (stages fetch/download/evaluate, stop, reattach)
+src/jobs.py              Background job thread + Progress model; state and results kept in data/jobs/ across restarts
 src/cli.py               Argument parsing, quiet native logs, exit codes
 src/models/              Bundled models with their licenses (README.md there): MediaPipe face landmarker (lip
                          movement), DNSMOS P.835 ONNX (voice quality)
@@ -105,6 +109,11 @@ data/feedback.jsonl      Reviewer votes on problem intervals (git-ignored)
   (`tests/conftest.py`).
 - **Calibrate with evidence:** reviewer votes (`qa.py feedback`) and batch labels (`qa.py batch`) are how thresholds
   should change; a check marked "flags too much" is the first candidate.
+- **API security:** without `DUBBING_QA_API_TOKEN`, `serve` refuses any host but 127.0.0.1; with it, every route
+  but `/health` needs the Bearer token. Keep both. Job ids from URLs are validated (`jobs.JOB_ID_RE`) before disk access.
+- **Docker:** CPU-only torch, non-root `app` user, `/data` created and owned by `app` before `VOLUME`, models baked
+  in. After changing system dependencies, rebuild and run the full suite inside the image (see README).
+- **CI** (`.github/workflows/tests.yml`) must stay green on Linux, macOS and Windows; it needs no secrets.
 - **Tests never call real services.** Perso: `tests/fake_perso.py`. Gemini/Claude: `tests/conftest.py` removes
   provider keys from the environment and stubs the pipeline's translation check; judge tests use fake sessions
   and clients. Keep it that way.
@@ -201,7 +210,7 @@ data/feedback.jsonl      Reviewer votes on problem intervals (git-ignored)
   then reports "busy, try again in a minute".
 - Whisper is seeded inside `transcribe` so results are repeatable; keep it that way (bump `CACHE_VERSION` in
   `src/evaluate.py` when cached Whisper results would change).
-- The job registry is in memory; restarting the app during a run loses tracking.
+- A job running when the app restarts can't resume; it's reported as interrupted (start it again).
 - Voice similarity is not measured on music-heavy videos (by design); its bands come from synthetic voices (same voice
   0.80-0.87 across languages, different voices median 0.13, max 0.57) and need real cloned dubs to confirm.
 - Voice quality misses a muffled (low-passed) voice, and its bands were set from damage simulated on two real dubs

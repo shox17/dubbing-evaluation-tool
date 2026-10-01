@@ -16,12 +16,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from src.paths import DATA_DIR
 from src.version import TOOL_VERSION
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-HISTORY_FILE = Path(os.getenv("DUBBING_QA_HISTORY", PROJECT_ROOT / "data" / "history.jsonl"))
+HISTORY_FILE = Path(os.getenv("DUBBING_QA_HISTORY") or DATA_DIR / "history.jsonl")
 LEVELS = ("good", "check", "poor")
 _lock = threading.Lock()
 
