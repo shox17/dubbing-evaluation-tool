@@ -16,9 +16,10 @@ deliver, with the reason.
 4. `src/report.py` turns everything into a report: a verdict (Good / Needs review / Poor), every measure with a
    level, a plain explanation and how it's graded, and every issue as a **problem interval** (`src/intervals.py`).
    Saved as `report.html`, `report.json` and `report.txt`, in English, Korean, Portuguese or Spanish.
-5. Compare mode (`src/compare.py`) runs steps 1–4 for links A and B, applies the decision rule (better verdict →
-   fewer Poor → fewer Check → less problem time → higher meaning score → higher speech timing; tie → A) and writes
-   `comparison.txt/.json/.html` (recommended version, problem intervals, reasoning first) plus `report_A/B.*`.
+5. Compare mode (`src/compare.py`) runs steps 1–4 for 2 to 8 links (A, B, C, ...), ranks them with the decision rule
+   (better verdict → fewer Poor → fewer Check → less problem time → higher meaning score → higher speech timing;
+   still tied → input order) and writes `comparison.txt/.json/.html` (recommended version, problem intervals,
+   reasoning first) plus `report_A.*`, `report_B.*`, ...
 
 Deeper docs: `README.md` (use), `docs/ARCHITECTURE.md` (modules, results schema), `docs/METRICS.md` (how each
 measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification, open items).
@@ -28,7 +29,7 @@ measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification,
 source eval_env/bin/activate                                   # Windows: eval_env\Scripts\activate
 python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report (Korean by default) + report.* in ./output
 python qa.py "<link>" --out ./output --lang en                 # another folder / language (ko | en | es | pt)
-python qa.py compare "<link A>" "<link B>" --out ./output       # compare two dubs, recommend one
+python qa.py compare "<link A>" "<link B>" [<C> ...] --out ./output  # rank 2-8 dubs, recommend one
 python qa.py batch links.txt --out ./output/batch                # many links → summary.csv (+ agreement with your labels)
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
@@ -38,7 +39,7 @@ pytest                                                         # ~20 s, adds rea
 Other CLI options (both modes): `--original <file or URL>` (link without an original), `--no-cache`, `--no-lipsync`,
 `--no-translation-check`, `--whisper-model small`, `--verbose` (show MediaPipe logs). Single mode only: `--script "…"`
 / `--script-file f.txt`, `--fail-on poor|check`. Exit codes: 0 done (compare: recommended dub is Good or Needs
-review), 1 single: verdict failed `--fail-on` / compare: both dubs Poor, 2 input or runtime error (batch: any link
+review), 1 single: verdict failed `--fail-on` / compare: every dub Poor, 2 input or runtime error (batch: any link
 failed; the summary is still written).
 
 ## Setting up a new machine
@@ -105,8 +106,8 @@ output/                  The CLI's default --out folder (git-ignored)
   thresholds in `src/intervals.py`, and the compare decision rule only in `src/compare.py` (`RULES`). The UI and
   CLI render reports and comparisons; they never re-derive levels or decisions. Every Good/Check/Poor row states
   how it's graded.
-- **The decision rule is deterministic and printed:** rule order, "skip a rule when a value is missing", tie → A,
-  and the both-Poor warning are part of the spec; change them only together with `c.rule.*` / `c.why.*` texts,
+- **The decision rule is deterministic and printed:** rule order, "skip a rule when any dub lacks its value", ties
+  keep input order, the reasoning compares #1 with #2, and the all-Poor warning are part of the spec; change them only together with `c.rule.*` / `c.why.*` texts,
   `c.rules_order`, `tests/test_compare.py`, README and this file.
 - **Any language pair:** the dub language comes from the share metadata (base code: `es-MX` → `es`). A language
   without a pace rule (`SPEECH_RATE`) or without a Whisper model is "not measured" with the reason, never graded

@@ -20,7 +20,7 @@ from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
 from src import i18n, perso_api
 from src.jobs import get_job, start_job
 from src.perso_api import PersoError, media_url, parse_share_url
-from src.compare import build_comparison, render_comparison_html
+from src.compare import build_ranking, render_comparison_html
 from src.pipeline import (compare_stages, load_results, new_run_dir, prune_old_runs, run_comparison,
                           run_share_evaluation, share_stages)
 from src.report import build_report, fmt_time, render_html
@@ -33,13 +33,14 @@ st.set_page_config(page_title="Dubbing QA Studio", page_icon=":material/movie:",
 RESULTS_SCHEMA_VERSION = 6
 assert RESULTS_SCHEMA_VERSION == SCHEMA_VERSION, "bump RESULTS_SCHEMA_VERSION together with evaluate.SCHEMA_VERSION"
 # Widget values that must survive while the setup form is hidden (progress/results views).
-FORM_KEYS = ["ui_lang", "share_url", "share_url_a", "share_url_b"]
+DUB_LABELS = "ABCDEFGH"                                  # compare mode: up to 8 dubs
+FORM_KEYS = ["ui_lang", "share_url", "compare_n"] + [f"share_url_{c.lower()}" for c in DUB_LABELS]
 
 for k in FORM_KEYS:
     if k in st.session_state:
         st.session_state[k] = st.session_state[k]
-for k, v in {"share_url": "", "share_url_a": "", "share_url_b": "",
-             "seek": 0, "seek_A": 0, "seek_B": 0}.items():
+for k, v in {"share_url": "", "seek": 0, "compare_n": 2, **{f"share_url_{c.lower()}": "" for c in DUB_LABELS},
+             **{f"seek_{c}": 0 for c in DUB_LABELS}}.items():
     st.session_state.setdefault(k, v)
 st.session_state.setdefault("ui_lang", pick_ui_language(st.context.locale))
 
@@ -159,7 +160,7 @@ with st.sidebar:
 # ---------------- progress view ----------------
 def render_progress(job):
     """Progress page for a running job: overall %, elapsed time and a live stage checklist."""
-    st.title(t("progress.title_compare" if job.stages == compare_stages() else "progress.title"),
+    st.title(t("progress.title_compare" if job.stages[-1] == "compare" else "progress.title"),
              icon=":material/hourglass_top:")
     st.caption(html.escape(job.params.get("title") or job.params["share_url"]))
 
@@ -455,19 +456,32 @@ def link_preview(url: str) -> Optional[dict]:
     return project
 
 
+def change_dub_count(delta: int):
+    """Adds or removes a dub slot in compare mode (button callback), keeping 2 to 8."""
+    st.session_state.compare_n = min(len(DUB_LABELS), max(2, st.session_state.compare_n + delta))
+
+
 def render_compare_setup():
-    """Setup for compare mode: two share links side by side, one button."""
+    """Setup for compare mode: 2 to 8 share links in a grid, one button."""
     projects = {}
+    dubs = DUB_LABELS[:st.session_state.compare_n]
     with st.container(border=True):
         st.subheader(t("compare.title"), icon=":material/compare:")
         st.caption(t("compare.caption"))
-        for col, dub in zip(st.columns(2), ("A", "B")):
-            with col:
-                st.markdown(f"**{t('c.dub', d=dub)}**")
-                st.text_input(t("c.dub", d=dub), key=f"share_url_{dub.lower()}", placeholder=t("share.placeholder"),
-                              label_visibility="collapsed")
-                projects[dub] = link_preview(st.session_state[f"share_url_{dub.lower()}"])
-        if all(projects.values()) and projects["A"].get("seq") == projects["B"].get("seq"):
+        for row in range(0, len(dubs), 2):
+            for col, dub in zip(st.columns(2), dubs[row:row + 2]):
+                with col:
+                    st.markdown(f"**{t('c.dub', d=dub)}**")
+                    st.text_input(t("c.dub", d=dub), key=f"share_url_{dub.lower()}", placeholder=t("share.placeholder"),
+                                  label_visibility="collapsed")
+                    projects[dub] = link_preview(st.session_state[f"share_url_{dub.lower()}"])
+        with st.container(horizontal=True):
+            st.button(t("compare.add"), key="add_dub", icon=":material/add:", on_click=change_dub_count, args=(1,),
+                      disabled=len(dubs) >= len(DUB_LABELS))
+            st.button(t("compare.remove"), key="remove_dub", icon=":material/remove:", on_click=change_dub_count,
+                      args=(-1,), disabled=len(dubs) <= 2)
+        seqs = [p.get("seq") for p in projects.values() if p]
+        if len(seqs) != len(set(seqs)):
             st.warning(t("compare.same_link"), icon=":material/content_copy:")
         if not judge_provider():
             st.caption(f":orange[:material/key_off:] {t('share.judge_missing')}")
@@ -476,14 +490,14 @@ def render_compare_setup():
         st.warning(t("problem.compare"), icon=":material/info:")
     if st.button(t("compare.start"), key="start_compare", type="primary", icon=":material/compare_arrows:",
                  disabled=not ready, width="stretch"):
-        params = dict(url_a=st.session_state.share_url_a.strip(), url_b=st.session_state.share_url_b.strip(),
-                      report_lang=st.session_state.ui_lang)
+        urls = [st.session_state[f"share_url_{d.lower()}"].strip() for d in dubs]
+        params = dict(url_a=urls[0], url_b=urls[1], more_urls=tuple(urls[2:]), report_lang=st.session_state.ui_lang)
         _, folder = new_run_dir()
         prune_old_runs(protect=folder)
         job = start_job(lambda report, cancel: run_comparison(**params, out_dir=folder, report=report, cancel_event=cancel),
                         {**params, "share_url": params["url_a"],
-                         "title": f"A: {projects['A'].get('title')}  ·  B: {projects['B'].get('title')}"},
-                        compare_stages())
+                         "title": "  ·  ".join(f"{d}: {projects[d].get('title')}" for d in dubs)},
+                        compare_stages(len(dubs)))
         st.query_params["job"] = job.id
         st.rerun()
 
@@ -502,7 +516,7 @@ def render_comparison(run: dict):
     """Comparison page: recommendation, problem intervals per dub (with their videos), reasoning, then details."""
     res = run["results"]
     # Rebuilt on every run so the page follows the interface language.
-    comp = build_comparison(res["A"], res["B"], st.session_state.ui_lang, run["comparison"]["meta"].get("run_seconds"))
+    comp = build_ranking(list(res.values()), st.session_state.ui_lang, run["comparison"]["meta"].get("run_seconds"))
     lb, rec, why = comp["labels"], comp["recommendation"], comp["reasoning"]
     st.title(lb["title"], icon=":material/compare:")
     with st.container(horizontal=True):
@@ -524,7 +538,10 @@ def render_comparison(run: dict):
             st.markdown(f"**{lb['fix_first']}**\n" + "\n".join(f"1. {html.escape(x)}" for x in rec["fix_first"]))
 
     st.markdown(f"**2. {lb['sec.intervals']}**")
-    for col, dub in zip(st.columns(2), ("A", "B")):
+    dubs = comp["dubs"]
+    per_row = 2 if len(dubs) in (2, 4) else 3
+    cols = [c for row in range(0, len(dubs), per_row) for c in st.columns(per_row)][:len(dubs)]
+    for col, dub in zip(cols, dubs):
         with col.container(border=True):
             p = res[dub].get("pipeline", {})
             verdict = comp["facts"][dub]["verdict"]
@@ -550,18 +567,21 @@ def render_comparison(run: dict):
         st.markdown(f"**3. {lb['sec.reasoning']}**")
         st.markdown(f"**{lb['rule_label']}:** {html.escape(why['rule_label'])}")
         with st.container(horizontal=True):
-            st.metric(lb["dub_A"], why["values"]["A"], border=True)
-            st.metric(lb["dub_B"], why["values"]["B"], border=True)
+            for d in dubs:
+                st.metric(lb["dub_" + d], why["values"][d], border=True)
+        if len(dubs) > 2:
+            st.markdown(f"**{lb['ranking_label']}:** " + " · ".join(
+                f"{r['rank']}. {lb['dub_' + r['dub']]} {badge(r['verdict'])}" for r in comp["ranking"]))
         st.markdown(html.escape(" ".join(why["summary"])))
         st.caption(why["translation_note"] + (f" {lb['skipped']}: {', '.join(why['skipped_rules'])}."
                                               if why["skipped_rules"] else ""))
         st.caption(why["rules_order"])
 
     st.markdown(f"**{lb['sec.table']}**")
-    st.dataframe(pd.DataFrame([(r["label"], cell(r["A"]), cell(r["B"])) for r in comp["table"]],
-                              columns=[lb["table.check"], lb["dub_A"], lb["dub_B"]]), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame([[r["label"]] + [cell(r[d]) for d in dubs] for r in comp["table"]],
+                              columns=[lb["table.check"]] + [lb["dub_" + d] for d in dubs]), hide_index=True, width="stretch")
     with st.expander(lb["sec.links"], icon=":material/link:"):
-        for col, dub in zip(st.columns(2), ("A", "B")):
+        for col, dub in zip(st.columns(len(dubs)), dubs):
             link = comp["links"][dub]
             col.markdown(f"**{lb['dub_' + dub]}**\n" + "\n".join(
                 f"- **{lb['meta.' + k]}:** {html.escape(str(link[k]))}"

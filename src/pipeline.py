@@ -18,7 +18,7 @@ from typing import Callable, Optional
 from dotenv import load_dotenv
 
 from src.batch import agreement, render_batch_text, summary_row, to_csv
-from src.compare import build_comparison, render_comparison_html, render_comparison_text
+from src.compare import LABELS, build_ranking, render_comparison_html, render_comparison_text
 from src.evaluate import run_full_evaluation, DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
 from src.perso_api import PersoError, download_media, get_shared_project, parse_share_url
@@ -168,9 +168,9 @@ def share_stages() -> list[str]:
     return ["fetch", "download", "evaluate"]
 
 
-def compare_stages() -> list[str]:
-    """The progress stages of a comparison of two share links."""
-    return ["dub_a", "dub_b", "compare"]
+def compare_stages(n: int = 2) -> list[str]:
+    """The progress stages of a comparison of n share links: one per dub, then the comparison."""
+    return [f"dub_{c.lower()}" for c in LABELS[:n]] + ["compare"]
 
 
 def evaluate_share(
@@ -347,7 +347,7 @@ def run_share_evaluation(
 
 
 def save_comparison_files(comp: dict, results: dict, out_dir) -> dict:
-    """Writes comparison.txt / .json / .html and report_A.* / report_B.* into out_dir; returns their paths."""
+    """Writes comparison.txt / .json / .html and report_A.*, report_B.*, ... into out_dir; returns their paths."""
     folder = Path(out_dir)
     folder.mkdir(parents=True, exist_ok=True)
     files = {"text": folder / "comparison.txt", "json": folder / "comparison.json", "html": folder / "comparison.html"}
@@ -355,7 +355,7 @@ def save_comparison_files(comp: dict, results: dict, out_dir) -> dict:
     _write_json(files["json"], {k: v for k, v in comp.items() if k != "reports"})
     files["html"].write_text(render_comparison_html(comp), encoding="utf-8")
     out = {k: str(v) for k, v in files.items()}
-    for dub in ("A", "B"):
+    for dub in comp["dubs"]:
         for kind, path in save_report_files(results[dub], folder, f"report_{dub}").items():
             out[f"{kind}_{dub}"] = path
     return out
@@ -373,18 +373,23 @@ def run_comparison(
     include_lipsync: Optional[bool] = None,
     use_translation_judge: bool = True,
     use_cache: bool = True,
+    more_urls: tuple = (),
     session=None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
-    """Evaluates two dubs of the same video with the full pipeline, recommends one, and saves every file.
+    """Evaluates dubs of the same video with the full pipeline, ranks them, recommends one, and saves every file.
 
-    Returns {"comparison", "results": {"A", "B"}, "files"}. The decision rule lives in src/compare.py.
+    url_a and url_b are dubs A and B; more_urls adds C, D, ... (up to 8 in all). Returns {"comparison", "results":
+    {"A", "B", ...}, "files"}. The decision rule lives in src/compare.py.
     """
+    urls = [url_a, url_b, *more_urls]
+    if len(urls) > len(LABELS):
+        raise ValueError(f"Compare at most {len(LABELS)} dubs at a time.")
     started = time.time()
     outer = _notifier(report)
     check_cancel = _canceller(cancel_event)
     results = {}
-    for dub, url in (("A", url_a), ("B", url_b)):
+    for dub, url in zip(LABELS, urls):
         span = {"fetch": (0.0, 0.03), "download": (0.03, 0.15), "evaluate": (0.15, 1.0)}
 
         def notify(stage, message, fraction=0.0, _dub=dub):
@@ -394,12 +399,12 @@ def run_comparison(
         results[dub] = evaluate_share(url, notify, check_cancel, whisper_model_name=whisper_model_name,
                                       include_lipsync=include_lipsync, use_translation_judge=use_translation_judge,
                                       original=original, use_cache=use_cache, session=session, sleep=sleep)
-    outer("compare", "Comparing the two dubs...", 0.5)
-    comp = build_comparison(results["A"], results["B"], report_lang, run_seconds=time.time() - started)
-    for dub in ("A", "B"):
+    outer("compare", "Comparing the dubs...", 0.5)
+    comp = build_ranking(list(results.values()), report_lang, run_seconds=time.time() - started)
+    for dub in comp["dubs"]:
         results[dub]["report"] = comp["reports"][dub]
     files = save_comparison_files(comp, results, out_dir)
-    outer("compare", "Comparing the two dubs...", 1.0)
+    outer("compare", "Comparing the dubs...", 1.0)
     return {"comparison": comp, "results": results, "files": files}
 
 

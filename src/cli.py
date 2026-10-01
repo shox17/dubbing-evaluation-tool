@@ -64,6 +64,7 @@ def parse_compare_args(argv: list[str]) -> argparse.Namespace:
                                  "recommend which one to deliver, and explain why.")
     ap.add_argument("url_a", help="Share link of dub A")
     ap.add_argument("url_b", help="Share link of dub B")
+    ap.add_argument("more", nargs="*", metavar="url_c", help="More share links (dubs C, D, ...; up to 8 in all)")
     _common(ap)
     args = ap.parse_args(argv)
     args.mode = "compare"
@@ -115,7 +116,7 @@ def use_utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Runs one evaluation or a comparison. Exit codes: 0 done, 1 see below, 2 input or runtime error.
 
-    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when both dubs are Poor. Batch mode: 0 when every
+    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when every dub is Poor. Batch mode: 0 when every
     link was evaluated, 2 when any link failed (the summary is written either way).
     """
     use_utf8_console()
@@ -165,7 +166,7 @@ def _run(args: argparse.Namespace, err) -> int:
         return _run_batch(args, options, err)
     try:
         if args.mode == "compare":
-            run = run_comparison(args.url_a, args.url_b, out_dir=args.out, **options)
+            run = run_comparison(args.url_a, args.url_b, out_dir=args.out, more_urls=tuple(args.more), **options)
         else:
             results = run_share_evaluation(args.share_url, ground_truth_text=script, out_dir=args.out, **options)
     except (ValueError, FileNotFoundError, PersoError) as e:
@@ -184,7 +185,7 @@ def _run(args: argparse.Namespace, err) -> int:
         print(json.dumps({k: v for k, v in comp.items() if k != "reports"}, ensure_ascii=False, indent=2)
               if args.json else render_comparison_text(comp))
         print("\nSaved: " + "\n       ".join(run["files"][k] for k in ("text", "html", "json")), file=err)
-        return 1 if comp["recommendation"]["both_poor"] else 0
+        return 1 if comp["recommendation"]["all_poor"] else 0
 
     rep = results["report"]
     print(json.dumps(rep, ensure_ascii=False, indent=2) if args.json else render_text(rep))

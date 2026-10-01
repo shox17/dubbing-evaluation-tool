@@ -266,3 +266,55 @@ def test_translation_check_is_cached_per_link_but_failures_are_retried(isolated_
     assert runs[0]["translation_judge"]["measured"] is False
     assert runs[1]["translation_judge"]["meaning_score"] == 5 and not runs[1]["translation_judge"].get("cached")
     assert runs[2]["translation_judge"]["meaning_score"] == 5 and runs[2]["translation_judge"]["cached"]
+
+
+# ---------------- three or more dubs ----------------
+from src.compare import build_ranking, rank
+from fake_perso import SHARE_TOKEN_C, SHARE_URL_C, SHARED_PROJECT_C
+
+
+def test_rank_orders_every_dub_and_explains_first_against_second():
+    r = rank({"A": f(verdict_rank=1, check=2), "B": f(verdict_rank=2, poor=1), "C": f(verdict_rank=1, check=1)})
+    assert r["order"] == ["C", "A", "B"] and (r["winner"], r["runner_up"], r["rule"]) == ("C", "A", "check_items")
+    assert r["values"] == {"A": 2, "B": 0, "C": 1}
+
+
+def test_a_rule_missing_for_any_dub_is_skipped_for_all():
+    r = rank({"A": f(meaning_score=3), "B": f(meaning_score=None, overlap_pct=75.0), "C": f(meaning_score=5, overlap_pct=70.0)})
+    assert "meaning_score" in r["skipped"] and r["rule"] == "speech_timing" and r["order"][0] == "A"
+
+
+def test_ties_keep_input_order():
+    r = rank({"A": f(poor=1, verdict_rank=2), "B": f(), "C": f()})
+    assert r["order"] == ["B", "C", "A"] and r["tie"] and (r["winner"], r["runner_up"]) == ("B", "C")
+
+
+def test_three_dub_comparison_ranks_warns_when_all_are_poor_and_renders_every_dub():
+    poor = lambda: make_results(acoustic_metrics={"dubbed_duration_sec": 40.0}, translation_judge=JUDGED)
+    comp = build_ranking([poor(), as_b(make_results(translation_judge=JUDGED)), poor()], "en")
+    assert comp["dubs"] == ["A", "B", "C"] and comp["recommendation"]["dub"] == "B"
+    assert [x["dub"] for x in comp["ranking"]] == ["B", "A", "C"]
+    text = render_comparison_text(comp, width=200)
+    assert "Ranking: 1. Dub B (Good) · 2. Dub A (Poor) · 3. Dub C (Poor)" in text
+    assert "Dub C (" in text and "Dub C = Poor" in text
+    assert "Dub C" in render_comparison_html(comp)
+    all_poor = build_ranking([poor(), poor(), poor()], "en")["recommendation"]
+    assert all_poor["all_poor"] and "None of the dubs is ready" in all_poor["warning"]
+    with pytest.raises(ValueError):
+        build_ranking([make_results()], "en")
+
+
+def test_compare_cli_takes_more_than_two_links(monkeypatch, isolated_output, tmp_path):
+    fake = FakePerso(projects={SHARE_TOKEN: dict(SHARED_PROJECT), SHARE_TOKEN_B: dict(SHARED_PROJECT_B),
+                               SHARE_TOKEN_C: dict(SHARED_PROJECT_C)})
+    plan = iter([make_results(acoustic_metrics={"dubbed_duration_sec": 40.0}), make_results(),
+                 make_results(acoustic_metrics={"dubbed_duration_sec": 40.0})])
+    monkeypatch.setattr(pipeline, "run_full_evaluation",
+                        lambda **kw: {k: v for k, v in next(plan).items() if k not in ("pipeline", "translation_judge")})
+    real = pipeline.run_comparison
+    monkeypatch.setattr(cli, "run_comparison", lambda *a, **kw: real(*a, **{**kw, "session": fake, "sleep": NO_SLEEP}))
+    code = cli.main(["compare", SHARE_URL, SHARE_URL_B, SHARE_URL_C, "--out", str(tmp_path), "--lang", "en",
+                     "--no-translation-check"])
+    assert code == 0 and (tmp_path / "report_C.html").is_file()
+    assert "Deliver Dub B." in (tmp_path / "comparison.txt").read_text(encoding="utf-8")
+    assert pipeline.compare_stages(3) == ["dub_a", "dub_b", "dub_c", "compare"]
