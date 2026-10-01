@@ -1,8 +1,10 @@
-"""Command line: evaluate the dub behind a Perso share link and print the report.
+"""Command line: evaluate the dub behind a Perso share link, or compare two dubs and recommend one.
 
-    python qa.py "https://perso.ai/en/share/video-translator?seq=..."
+    python qa.py "<share link>" --out ./output --lang ko
+    python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
 
-Progress goes to stderr, the report to stdout; report.json / report.html / report.txt are saved in the run folder.
+Progress goes to stderr, the report to stdout. Single mode saves report.json / .html / .txt in --out; compare
+mode saves comparison.* plus report_A.* and report_B.*.
 """
 import os
 import sys
@@ -10,39 +12,66 @@ import json
 import logging
 import argparse
 import contextlib
+from pathlib import Path
 
 from src.evaluate import DEFAULT_WHISPER_MODEL
 from src.jobs import Cancelled, Progress
 from src.perso_api import PersoError
-from src.pipeline import run_share_evaluation
+from src.pipeline import run_comparison, run_share_evaluation
+from src.compare import render_comparison_text
 from src.report import render_text
 
 log = logging.getLogger(__name__)
 FAIL_LEVELS = {"never": (), "poor": ("poor",), "check": ("check", "poor")}
+LANGS = ["ko", "en", "es", "pt"]
+DEFAULT_OUT = "output"
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    """Command-line options."""
-    ap = argparse.ArgumentParser(prog="qa.py", description="Evaluate the quality of a Perso AI dub from its share link.")
-    ap.add_argument("share_url", help="Perso share link (https://perso.ai/.../share/video-translator?seq=...)")
-    script = ap.add_mutually_exclusive_group()
-    script.add_argument("--script", help="What the dub should say, to also score script accuracy")
-    script.add_argument("--script-file", help="File with what the dub should say (UTF-8)")
+def _common(ap: argparse.ArgumentParser) -> None:
+    """Options shared by single and compare mode."""
+    ap.add_argument("--out", default=DEFAULT_OUT, help="Folder for the report files (created if missing; default ./output)")
+    ap.add_argument("--lang", choices=LANGS, default="ko", help="Report language (default ko)")
+    ap.add_argument("--original", help="The original video (file or URL), used when a share link has none")
     ap.add_argument("--whisper-model", default=DEFAULT_WHISPER_MODEL, help=f"Speech model (default {DEFAULT_WHISPER_MODEL})")
     ap.add_argument("--no-lipsync", action="store_true", help="Skip lip movement even for a lip-synced dub (faster). By default it is measured "
                          "automatically when the dub is lip-synced")
     ap.add_argument("--no-translation-check", action="store_true", help="Skip the translation check (by default it runs automatically when GEMINI_API_KEY or ANTHROPIC_API_KEY is set)")
+    ap.add_argument("--no-cache", action="store_true", help="Download the videos and run speech recognition again instead of reusing earlier results")
     ap.add_argument("--json", action="store_true", help="Print the report as JSON instead of text")
-    ap.add_argument("--lang", choices=["en", "ko", "pt", "es"], default="en", help="Report language (default en)")
     ap.add_argument("--verbose", action="store_true", help="Show library logs (MediaPipe, TensorFlow) while running")
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for single mode."""
+    ap = argparse.ArgumentParser(prog="qa.py", description="Evaluate the quality of a Perso AI dub from its share link. "
+                                 "To compare two dubs: qa.py compare <link A> <link B>.")
+    ap.add_argument("share_url", help="Perso share link (https://perso.ai/.../share/video-translator?seq=...)")
+    script = ap.add_mutually_exclusive_group()
+    script.add_argument("--script", help="What the dub should say, to also score script accuracy")
+    script.add_argument("--script-file", help="File with what the dub should say (UTF-8)")
+    _common(ap)
     ap.add_argument("--fail-on", choices=list(FAIL_LEVELS), default="never",
                     help="Exit with code 1 when the verdict is this bad (for automation)")
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    args.mode = "single"
+    return args
+
+
+def parse_compare_args(argv: list[str]) -> argparse.Namespace:
+    """Command-line options for compare mode."""
+    ap = argparse.ArgumentParser(prog="qa.py compare", description="Evaluate two Perso dubs of the same video, "
+                                 "recommend which one to deliver, and explain why.")
+    ap.add_argument("url_a", help="Share link of dub A")
+    ap.add_argument("url_b", help="Share link of dub B")
+    _common(ap)
+    args = ap.parse_args(argv)
+    args.mode = "compare"
+    return args
 
 
 @contextlib.contextmanager
 def quiet_native_stderr(enabled: bool):
-    """Sends C++ library logs (MediaPipe writes straight to fd 2) to /dev/null; yields a stream for our messages."""
+    """Sends C++ library logs (MediaPipe writes straight to fd 2) to the null device; yields a stream for our messages."""
     if not enabled:
         yield sys.stderr
         return
@@ -50,7 +79,7 @@ def quiet_native_stderr(enabled: bool):
     saved = os.dup(2)
     devnull = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull, 2)
-    ours = os.fdopen(os.dup(saved), "w", buffering=1)
+    ours = os.fdopen(os.dup(saved), "w", buffering=1, encoding="utf-8", errors="replace")
     try:
         yield ours
     finally:
@@ -61,9 +90,23 @@ def quiet_native_stderr(enabled: bool):
         ours.close()
 
 
+def use_utf8_console() -> None:
+    """Prints Korean and other non-ASCII text correctly on every console (Windows defaults to a legacy code page)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass                                  # replaced streams (tests, pipes in some IDEs) keep their encoding
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Runs one evaluation. Exit codes: 0 done, 1 verdict failed --fail-on, 2 could not evaluate."""
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    """Runs one evaluation or a comparison. Exit codes: 0 done, 1 see below, 2 input or runtime error.
+
+    Single mode: 1 when the verdict fails --fail-on. Compare mode: 1 when both dubs are Poor.
+    """
+    use_utf8_console()
+    argv = sys.argv[1:] if argv is None else argv
+    args = parse_compare_args(argv[1:]) if argv[:1] == ["compare"] else parse_args(argv)
     with quiet_native_stderr(not args.verbose and _has_real_stderr()) as err:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", stream=err, force=True)
         return _run(args, err)
@@ -77,37 +120,54 @@ def _has_real_stderr() -> bool:
         return False
 
 
-def _run(args: argparse.Namespace, err) -> int:
-    """The evaluation itself, printing progress and errors to err."""
-    script = args.script
-    if args.script_file:
-        try:
-            with open(args.script_file, encoding="utf-8") as f:
-                script = f.read()
-        except OSError as e:
-            print(f"Can't read the script file: {e}", file=err)
-            return 2
-
+def _progress(err):
+    """A progress callback that prints each new message once."""
     last = {"msg": None}
 
     def progress(p: Progress):
-        """Prints each new progress message once."""
+        """Prints a progress line when the message changes."""
         if p.message != last["msg"]:
             last["msg"] = p.message
             print(f"  [{p.stage}] {p.message}", file=err, flush=True)
+    return progress
 
+
+def _run(args: argparse.Namespace, err) -> int:
+    """The evaluation or comparison itself, printing progress and errors to err."""
+    script = getattr(args, "script", None)
+    if getattr(args, "script_file", None):
+        try:
+            script = Path(args.script_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"Can't read the script file: {e}", file=err)
+            return 2
+    options = dict(report=_progress(err), whisper_model_name=args.whisper_model,
+                   # None = automatic: lip movement is measured only when the dub is lip-synced.
+                   include_lipsync=False if args.no_lipsync else None,
+                   use_translation_judge=not args.no_translation_check, report_lang=args.lang,
+                   original=args.original, use_cache=not args.no_cache)
     try:
-        results = run_share_evaluation(
-            args.share_url, ground_truth_text=script, report=progress, whisper_model_name=args.whisper_model,
-            # None = automatic: lip movement is measured only when the dub is lip-synced.
-            include_lipsync=False if args.no_lipsync else None,
-            use_translation_judge=not args.no_translation_check, report_lang=args.lang)
+        if args.mode == "compare":
+            run = run_comparison(args.url_a, args.url_b, out_dir=args.out, **options)
+        else:
+            results = run_share_evaluation(args.share_url, ground_truth_text=script, out_dir=args.out, **options)
     except (ValueError, FileNotFoundError, PersoError) as e:
         print(f"\nCould not evaluate: {e}", file=err)
         return 2
     except (Cancelled, KeyboardInterrupt):
         print("\nStopped.", file=err)
         return 2
+    except Exception as e:  # anything unexpected (ffmpeg, a broken video) is a runtime error, exit code 2
+        log.debug("Evaluation failed", exc_info=True)
+        print(f"\nCould not evaluate: {e.__class__.__name__}: {e}", file=err)
+        return 2
+
+    if args.mode == "compare":
+        comp = run["comparison"]
+        print(json.dumps({k: v for k, v in comp.items() if k != "reports"}, ensure_ascii=False, indent=2)
+              if args.json else render_comparison_text(comp))
+        print("\nSaved: " + "\n       ".join(run["files"][k] for k in ("text", "html", "json")), file=err)
+        return 1 if comp["recommendation"]["both_poor"] else 0
 
     rep = results["report"]
     print(json.dumps(rep, ensure_ascii=False, indent=2) if args.json else render_text(rep))

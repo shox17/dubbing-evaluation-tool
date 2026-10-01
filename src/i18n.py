@@ -58,6 +58,10 @@ TEXT = {
     "stage.download": {"en": "Download both videos", "ko": "두 영상 다운로드", "pt": "Baixar os dois vídeos",
                        "es": "Descargar ambos videos"},
     "stage.evaluate": {"en": "Measure quality", "ko": "품질 측정", "pt": "Medir a qualidade", "es": "Medir la calidad"},
+    "stage.dub_a": {"en": "Evaluate dub A", "ko": "더빙 A 평가", "pt": "Avaliar a dublagem A", "es": "Evaluar el doblaje A"},
+    "stage.dub_b": {"en": "Evaluate dub B", "ko": "더빙 B 평가", "pt": "Avaliar a dublagem B", "es": "Evaluar el doblaje B"},
+    "stage.compare": {"en": "Compare and recommend", "ko": "비교 및 추천", "pt": "Comparar e recomendar",
+                      "es": "Comparar y recomendar"},
 
     # ----- time -----
     "time.min_sec": {"en": "{m} min {s} s", "ko": "{m}분 {s}초", "pt": "{m} min {s} s", "es": "{m} min {s} s"},
@@ -380,6 +384,14 @@ MESSAGES = {
                                           "es": "Descargando el video original..."},
     "Checking which language the dub is in...": {"ko": "더빙 언어 확인 중...", "pt": "Verificando o idioma da dublagem...",
                                                  "es": "Comprobando el idioma del doblaje..."},
+    "Comparing the two dubs...": {"ko": "두 더빙 비교 중...", "pt": "Comparando as duas dublagens...",
+                                  "es": "Comparando los dos doblajes..."},
+    "This share link has no original video. Pass the original with --original <file or URL> (command line), then try again.": {
+        "ko": "이 공유 링크에는 원본 영상이 없습니다. 명령줄에서 --original <파일 또는 URL>로 원본을 지정한 뒤 다시 시도하세요.",
+        "pt": "Este link não tem o vídeo original. Informe o original com --original <arquivo ou URL> (linha de comando) "
+              "e tente de novo.",
+        "es": "Este enlace no tiene el video original. Indica el original con --original <archivo o URL> (línea de "
+              "comandos) y vuelve a intentarlo."},
     "Checking the dub's language part by part...": {"ko": "더빙 언어를 구간별로 확인 중...",
                                                     "pt": "Verificando o idioma da dublagem por trechos...",
                                                     "es": "Comprobando el idioma del doblaje por partes..."},

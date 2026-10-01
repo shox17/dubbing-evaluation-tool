@@ -526,22 +526,39 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
     return {"value": round(count / speaking_sec, 2), "unit": unit}
 
 
+def _media_id(path: str) -> str:
+    """A cache key for a media file: its name and size (cached downloads are named after their source)."""
+    return f"{os.path.basename(path)}:{os.path.getsize(path)}"
+
+
 def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground_truth_text: str,
                         target_lang: str = "ko", whisper_model_name: str = DEFAULT_WHISPER_MODEL,
                         on_step: Optional[Callable[[str, float], None]] = None,
-                        include_lipsync: bool = True, source_lang: Optional[str] = None) -> dict:
+                        include_lipsync: bool = True, source_lang: Optional[str] = None,
+                        cache=None) -> dict:
     """Runs the acoustic, speech-recognition, timing, file and lip-sync evaluation. Returns results; writes no files.
 
     include_lipsync: the experimental lip-movement analysis is the slowest step; False skips it.
     source_lang: the original's language when known (share links say it); None lets Whisper detect it.
+    cache: an optional dict-like store (get / item assignment) for Whisper results, keyed by model, language and
+    media file, so a rerun on the same videos skips speech recognition. The caller owns any file it writes to.
     """
+    cache = cache if cache is not None else {}
+
+    def cached(key: str, compute: Callable[[], object]):
+        """The cached value for key, computing and storing it on a miss."""
+        value = cache.get(key)
+        if value is None:
+            value = compute()
+            cache[key] = value
+        return value
     def step(msg: str, frac: float):
         """Reports evaluation progress, if a callback was given."""
         if on_step:
             on_step(msg, frac)
 
     step("Loading the speech recognition model...", 0.02)
-    model = get_whisper_model(whisper_model_name)
+    model = lambda: get_whisper_model(whisper_model_name)      # loaded only when a result isn't cached
 
     step("Extracting audio from both videos...", 0.10)
     with tempfile.TemporaryDirectory(prefix="dubeval_") as tmp:
@@ -552,13 +569,17 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     orig_ac = analyze_acoustics(y_orig)
     dub_ac = analyze_acoustics(y_dub)
 
-    step("Transcribing the original speech...", 0.20)
-    orig_stt = transcribe(y_orig, model, language=whisper_language(source_lang) if source_lang else None)
-    step("Checking which language the dub is in...", 0.40)
-    dub_detected, dub_detected_prob = detect_language(y_dub, model)
-    step("Transcribing the dubbed speech...", 0.45)
+    orig_id, dub_id = _media_id(original_video_path), _media_id(dubbed_video_path)
+    src_lang = whisper_language(source_lang) if source_lang else None
     stt_lang = whisper_language(target_lang)
-    dub_stt = transcribe(y_dub, model, language=stt_lang)
+    step("Transcribing the original speech...", 0.20)
+    orig_stt = cached(f"stt|{whisper_model_name}|{src_lang or 'auto'}|{orig_id}",
+                      lambda: transcribe(y_orig, model(), language=src_lang))
+    step("Checking which language the dub is in...", 0.40)
+    dub_detected, dub_detected_prob = cached(f"lang|{whisper_model_name}|{dub_id}", lambda: detect_language(y_dub, model()))
+    step("Transcribing the dubbed speech...", 0.45)
+    dub_stt = cached(f"stt|{whisper_model_name}|{stt_lang or 'auto'}|{dub_id}",
+                     lambda: transcribe(y_dub, model(), language=stt_lang))
     scores = score_transcript(ground_truth_text, dub_stt["text"], target_lang)
 
     step("Comparing when each track speaks...", 0.65)
@@ -567,7 +588,8 @@ def run_full_evaluation(original_video_path: str, dubbed_video_path: str, ground
     alignment = timing_alignment(orig_speech, dub_speech, max(orig_ac["duration_sec"], dub_ac["duration_sec"]))
     clarity = speech_clarity(dub_stt["segments"])
     step("Checking the dub's language part by part...", 0.67)
-    lang_windows = language_windows(y_dub, model, dub_speech, stt_lang)
+    lang_windows = cached(f"langwin|{whisper_model_name}|{stt_lang}|{dub_id}",
+                          lambda: language_windows(y_dub, model(), dub_speech, stt_lang))
     integrity = video_integrity(original_video_path, dubbed_video_path)
 
     if include_lipsync:
