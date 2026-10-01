@@ -2,11 +2,16 @@
 
 Automatic quality reports for videos dubbed with **[Perso AI](https://perso.ai)**.
 
-Paste a **Perso share link**, and the tool downloads the original and the dub, measures both, and writes a report: an overall **verdict**, every measure marked **Good / Check / Poor** with a plain-language explanation and the thresholds it used, and a timestamped list of **things to check**. No Perso account, API key or credits are needed.
+Paste a **Perso share link**, and the tool downloads the original and the dub, measures both, and writes a report: an overall **verdict**, every measure marked **Good / Check / Poor** with a plain-language explanation and the thresholds it used, and every problem as a **time range** to check. No Perso account, API key or credits are needed.
+
+**Compare mode** takes two share links (two dubs of the same video), evaluates both the same way, **recommends which one to deliver** with a fixed decision rule, and explains why.
 
 ```bash
-python qa.py "https://perso.ai/en/share/video-translator?seq=…"
+python qa.py "https://perso.ai/en/share/video-translator?seq=…" --out ./output --lang ko
+python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
 ```
+
+Works with any language pair, with or without lip-sync, on Windows, macOS and Linux.
 
 | Section | What it checks | How |
 |---|---|---|
@@ -18,7 +23,7 @@ python qa.py "https://perso.ai/en/share/video-translator?seq=…"
 | **Lip movement** *(experimental, lip-synced dubs only)* | Does the mouth move with the voice? | MediaPipe mouth opening vs loudness, compared with the original; measured automatically when the dub is lip-synced; never part of the verdict |
 | **Script accuracy** *(CLI, when you pass a script)* | Is the script you expected heard in the dub? | Whisper transcript vs your script: CER for Korean, Japanese, Chinese and Thai, WER otherwise |
 
-Every run saves `report.html` (a standalone page to share), `report.json` and `report.txt` in its run folder.
+Every run saves `report.html` (a standalone page to share), `report.json` and `report.txt` in the `--out` folder (default `./output`). Compare mode saves `comparison.txt` / `.json` / `.html` plus `report_A.*` and `report_B.*`.
 
 ---
 
@@ -29,10 +34,13 @@ Every run saves `report.html` (a standalone page to share), `report.json` and `r
             ─► download the original + the dub (the lip-synced one when there is one)
             ─► measure on your machine: audio · Whisper (language, clarity, timing) · file check · lip movement
             ─► translation check on both transcripts (Gemini, or Claude), automatic when a key is set
-            ─► report: verdict · sections · things to check  →  report.html / report.json / report.txt
+            ─► report: verdict · sections · problem intervals  →  report.html / report.json / report.txt
+
+ compare: link A + link B ─► the pipeline above for each ─► decision rule ─► comparison.txt / .json / .html
 ```
 
 - **Verdict rule:** any Poor → **Poor**; otherwise any Check → **Needs review**; otherwise **Good**. Informational and not-measured items don't count, and are listed with the reason.
+- **Downloads and speech recognition are cached per share link** (`data/cache/`), so a rerun of the same link takes seconds. `--no-cache` redoes everything.
 - In the app the work runs in a **background thread**, so reloading the page is safe: the job id in the URL reattaches to it.
 - All measuring (Whisper, MediaPipe, audio) happens **on your machine**. Only the translation check sends the two transcripts (text, not audio) to Gemini or Claude.
 
@@ -43,7 +51,7 @@ More detail: [Architecture](docs/ARCHITECTURE.md) · [Metrics and score bands](d
 ## Get started on a new machine
 
 ### 1. What you need
-- **Python 3.14** (the pinned package versions were verified on macOS arm64). Check with `python3 --version`.
+- **Python 3.14** (the pinned package versions were verified on macOS arm64; on Windows or Linux, if a pinned version doesn't install, use the unpinned command in [AGENTS.md](AGENTS.md#setting-up-a-new-machine)). Check with `python3 --version` (`py --version` on Windows).
 - **git**
 - About **2 GB of free disk space** (Python packages plus the Whisper model).
 - A **Gemini API key** (`GEMINI_API_KEY`, from Google AI Studio) for the translation check. A Claude key (`ANTHROPIC_API_KEY`) also works. Without a key, everything else still runs and the translation check shows as "not measured".
@@ -85,15 +93,39 @@ In Perso, open the dubbed video, choose **Share**, and copy the link. It looks l
 3. Press **Evaluate this dub**.
 4. The results page shows the **verdict**, both videos side by side, the six report **sections** with a speech timeline chart, and **things to check**; each ▶ button starts both videos at that moment. **Detailed measurements** (table, loudness chart, transcripts) are below. Download **Report (HTML)** or **Data (JSON)**.
 
-**Interface language:** English, 한국어, Português or Español (sidebar). Everything follows it: the report's explanations, verdict and things to check, Gemini's translation comments, error messages, and the downloaded HTML report. The command line takes `--lang ko` (or `pt`, `es`).
+**Interface language:** English, 한국어, Português or Español (sidebar). Everything follows it: the report's explanations, verdict and things to check, Gemini's translation comments, error messages, and the downloaded HTML report. The command line takes `--lang ko` (the default), `en`, `es` or `pt`.
+
+### Compare two dubs
+**In the app:** open the **Compare two dubs** tab, paste link A and link B (each shows a preview), and press **Evaluate and compare**. The comparison page shows the recommended version, the problem intervals of each dub next to its video (▶ jumps there), the reasoning, and every check side by side. Download it as HTML or JSON.
+
+**On the command line:**
+```bash
+python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
+```
+Both dubs go through the full pipeline. **Decision rule**, stopping at the first rule that separates them:
+1. better overall verdict (Good > Needs review > Poor)
+2. fewer Poor items
+3. fewer Check items
+4. less total time in problem intervals (seconds)
+5. higher translation meaning score (1–5)
+6. higher speech-timing alignment (%)
+
+Still tied → Dub A, and the comparison says it's a tie. A rule is skipped when a dub has no value for it (for example, no translation check), and the comparison then says the decision was made without translation. If **both dubs are Poor**, the better one is still named, with a clear "neither is ready to deliver" warning and what to fix first.
+
+`comparison.txt` and the top of `comparison.html` start with **1. Recommended version**, **2. Problem intervals** (per dub, e.g. `12.4s-15.1s | Dub B | missing speech | Poor | Translation check | The line about … is not spoken`) and **3. Reasoning** (the rule, the values for A and B, a short summary), followed by every check side by side, each link's details, measurement notes, the tool version and the run time. Probable speech-recognition errors are listed separately and never count.
+
+**Exit codes:** `0` the recommended dub is Good or Needs review · `1` both dubs are Poor · `2` input or runtime error (invalid link, sharing turned off, …).
 
 ### The command line
 ```bash
-python qa.py "<share link>"                        # text report on screen, files saved in the run folder
+python qa.py "<share link>"                        # text report on screen (Korean by default), files in ./output
 python qa.py "<share link>" --script-file ko.txt   # also score script accuracy
 python qa.py "<share link>" --no-lipsync --no-translation-check   # fastest (skips lip movement even if lip-synced)
 python qa.py "<share link>" --json                 # machine-readable
 python qa.py "<share link>" --fail-on poor         # exit code 1 on a Poor verdict (automation)
+python qa.py "<share link>" --out reports --lang en   # another folder (created if missing), English report
+python qa.py "<share link>" --original original.mp4   # when the share link has no original (file or URL)
+python qa.py "<share link>" --no-cache             # download and transcribe again
 ```
 
 ### Score bands
@@ -134,7 +166,10 @@ qa.py                    Command line: python qa.py "<share link>"
 app.py                   Streamlit UI: paste link → progress → report
 .streamlit/config.toml   Theme (colors, fonts; light and dark)
 src/perso_api.py         Share links: parse the link, read the public project, download the videos
-src/pipeline.py          Share link → download → evaluate → translation check → report files
+src/pipeline.py          Share link → download (cached) → evaluate → translation check → report files; compare mode
+src/compare.py           Compare mode: decision rule, comparison model, text and HTML renderers (pure)
+src/intervals.py         Problem intervals: collect, merge, clip, round, sort (pure)
+src/version.py           Tool version printed in comparisons
 src/evaluate.py          All measurements (pure functions, no file writes)
 src/translation_judge.py Translation check with Gemini (or Claude): retries, model fallback, structured JSON
 src/report.py            Verdict, levels, messages, things to check; text and HTML renderers (pure)
@@ -144,7 +179,9 @@ src/i18n.py              Interface text in English, Korean, Portuguese and Spani
 src/face_landmarker.task MediaPipe face model used for lip movement
 tests/                   pytest suite; tests/fake_perso.py fakes the share endpoint. tests/data/sample.mp4 (any ~30 s
                          English talking-head clip) is local test media, not in git; slow tests skip without it
-data/output/runs/<id>/   Downloaded videos and report files of each run (not committed)
+data/cache/<link>/       Downloaded videos and Whisper results per share link (not committed)
+data/output/runs/<id>/   Report files of each app run (not committed)
+output/                  The command line's default --out folder (not committed)
 docs/                    Architecture, metrics, engineering review
 AGENTS.md                Guide and rules for AI coding agents (Codex reads it; CLAUDE.md imports it)
 CLAUDE.md                Imports AGENTS.md for Claude Code
@@ -170,6 +207,8 @@ Open items are tracked in [docs/ENGINEERING_REVIEW.md](docs/ENGINEERING_REVIEW.m
 | "This doesn't look like a Perso share link" | Copy the whole link from Perso's **Share** dialog; it contains `/share/` and `?seq=`. |
 | "Sharing is turned off for this Perso project" | Ask the owner to turn sharing on for that video in Perso, then try again. |
 | "This shared project has no finished dubbed video yet" | Wait until Perso finishes dubbing, then try again. |
+| "This share link has no original video" | Pass the original with `--original <file or URL>`. |
+| Korean text shows as `???` in a Windows console | The CLI switches its output to UTF-8; use Windows Terminal, or open `comparison.txt` / `report.txt`, which are always UTF-8. |
 | Translation check shows "not measured" | Add `GEMINI_API_KEY` to `.env` and restart. The reason in the report says what went wrong; everything else still works. |
 | "Gemini is overloaded right now" | A temporary Google capacity problem (HTTP 503). The tool already retried and tried a second model; run it again in a minute. |
 | First run is slow | It's downloading the Whisper speech model (~145 MB). This happens only once. |

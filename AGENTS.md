@@ -5,7 +5,8 @@ this file, so keep everything here.
 
 ## What this is
 **Dubbing QA Studio**: a Streamlit app and a CLI (`qa.py`) that evaluate a Perso AI dub from its **share link**
-and write a quality report.
+and write a quality report, or (**compare mode**) evaluate two dubs of the same video and recommend which one to
+deliver, with the reason.
 
 1. The share link's public endpoint (no key, no account, no credits) gives the original video and the dub.
 2. The tool downloads both (the lip-synced dub when there is one), then measures them: length, loudness, silence,
@@ -13,8 +14,11 @@ and write a quality report.
    (experimental, lip-synced dubs only), and script accuracy when a script is passed to the CLI.
 3. Gemini (or Claude) checks the translation automatically when a key is set.
 4. `src/report.py` turns everything into a report: a verdict (Good / Needs review / Poor), every measure with a
-   level, a plain explanation and how it's graded, and timestamped **things to check**. Saved as `report.html`,
-   `report.json` and `report.txt`, in English, Korean, Portuguese or Spanish.
+   level, a plain explanation and how it's graded, and every issue as a **problem interval** (`src/intervals.py`).
+   Saved as `report.html`, `report.json` and `report.txt`, in English, Korean, Portuguese or Spanish.
+5. Compare mode (`src/compare.py`) runs steps 1–4 for links A and B, applies the decision rule (better verdict →
+   fewer Poor → fewer Check → less problem time → higher meaning score → higher speech timing; tie → A) and writes
+   `comparison.txt/.json/.html` (recommended version, problem intervals, reasoning first) plus `report_A/B.*`.
 
 Deeper docs: `README.md` (use), `docs/ARCHITECTURE.md` (modules, results schema), `docs/METRICS.md` (how each
 measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification, open items).
@@ -22,16 +26,18 @@ measure works and its bands), `docs/ENGINEERING_REVIEW.md` (state, verification,
 ## Commands
 ```bash
 source eval_env/bin/activate                                   # Windows: eval_env\Scripts\activate
-python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report in the terminal (+ files in data/output/runs/<id>/)
-python qa.py "<link>" --lang ko                                # report in Korean (en | ko | pt | es)
+python qa.py "https://perso.ai/en/share/video-translator?seq=…"  # report (Korean by default) + report.* in ./output
+python qa.py "<link>" --out ./output --lang en                 # another folder / language (ko | en | es | pt)
+python qa.py compare "<link A>" "<link B>" --out ./output       # compare two dubs, recommend one
 python qa.py "<link>" --json                                   # machine-readable report
 streamlit run app.py                                           # app at http://localhost:8501
 pytest -m "not slow"                                           # ~6 s, offline. Run after every change
 pytest                                                         # ~20 s, adds real Whisper runs (need tests/data/sample.mp4)
 ```
-Other CLI options: `--no-lipsync`, `--no-translation-check`, `--whisper-model small`, `--script "…"` /
-`--script-file f.txt`, `--fail-on poor|check` (exit 1), `--verbose` (show MediaPipe logs). Exit codes: 0 done,
-1 verdict failed `--fail-on`, 2 couldn't evaluate.
+Other CLI options (both modes): `--original <file or URL>` (link without an original), `--no-cache`, `--no-lipsync`,
+`--no-translation-check`, `--whisper-model small`, `--verbose` (show MediaPipe logs). Single mode only: `--script "…"`
+/ `--script-file f.txt`, `--fail-on poor|check`. Exit codes: 0 done (compare: recommended dub is Good or Needs
+review), 1 single: verdict failed `--fail-on` / compare: both dubs Poor, 2 input or runtime error.
 
 ## Setting up a new machine
 ```bash
@@ -51,12 +57,17 @@ pytest -m "not slow"
 ## Project map
 ```
 qa.py                    CLI entry point → src/cli.py
-app.py                   Streamlit UI: paste link (live preview) → progress → report. Only rendering; no logic.
+app.py                   Streamlit UI: tabs "Check one dub" / "Compare two dubs" → progress → report or comparison.
+                         Only rendering; no logic.
 src/perso_api.py         Share links: parse_share_url, get_shared_project (public GET), download_media
-src/pipeline.py          run_share_evaluation: fetch → download → evaluate → translation check → report files
+src/pipeline.py          evaluate_share (fetch → cached download → evaluate → translation check), run_share_evaluation
+                         (+ report files), run_comparison (two links → comparison files); per-link cache in data/cache/
 src/evaluate.py          All measurements (pure). run_full_evaluation returns the results dict (SCHEMA_VERSION)
 src/translation_judge.py Translation check: Gemini first (REST, retries + model fallback), else Claude
-src/report.py            build_report(results, lang): levels, verdict, things to check; render_text / render_html (pure)
+src/report.py            build_report(results, lang): levels, verdict, intervals, things to check; renderers (pure)
+src/intervals.py         Problem intervals: collect from every check, merge (< 0.5 s), clip, round 0.1 s, sort (pure)
+src/compare.py           Compare mode: facts, decide (the rule), build_comparison, text/HTML renderers (pure)
+src/version.py           TOOL_VERSION, printed in comparison footers
 src/report_text.py       Every report sentence in en/ko/pt/es (keys r.*), merged into i18n.TEXT
 src/i18n.py              UI text (TEXT), fixed progress/error messages (MESSAGES), t(), translate_message()
 src/jobs.py              Background job thread + Progress model (stages fetch/download/evaluate, stop, reattach)
@@ -65,7 +76,9 @@ src/face_landmarker.task MediaPipe face model (lip movement)
 tests/fake_perso.py      Fake share endpoint + media host, with a real response shape
 tests/sample_results.py  A realistic results dict (make_results) for report/CLI/UI tests
 tests/data/sample.mp4    Local only (git-ignored): any ~30 s English talking-head MP4; the 2 slow tests skip without it
-data/output/             Run folders and results.json, created at run time (git-ignored)
+data/output/             App run folders and results.json, created at run time (git-ignored)
+data/cache/              Per share link: downloaded videos + whisper_cache.json (git-ignored)
+output/                  The CLI's default --out folder (git-ignored)
 ```
 
 ## Rules
@@ -82,8 +95,18 @@ data/output/             Run folders and results.json, created at run time (git-
   is a text key (`not_measured("r.judge.…")`).
 - `src/evaluate.py` and `src/report.py` stay pure (no file writes except temp audio, no network, no import side
   effects). Streamlit stays out of `src/`.
-- **Levels, thresholds and messages live only in `src/report.py`** (thresholds are constants at its top). The UI
-  and CLI render the report; they never re-derive levels. Every Good/Check/Poor row states how it's graded.
+- **Levels, thresholds and messages live only in `src/report.py`** (thresholds are constants at its top), interval
+  thresholds in `src/intervals.py`, and the compare decision rule only in `src/compare.py` (`RULES`). The UI and
+  CLI render reports and comparisons; they never re-derive levels or decisions. Every Good/Check/Poor row states
+  how it's graded.
+- **The decision rule is deterministic and printed:** rule order, "skip a rule when a value is missing", tie → A,
+  and the both-Poor warning are part of the spec; change them only together with `c.rule.*` / `c.why.*` texts,
+  `c.rules_order`, `tests/test_compare.py`, README and this file.
+- **Any language pair:** the dub language comes from the share metadata (base code: `es-MX` → `es`). A language
+  without a pace rule (`SPEECH_RATE`) or without a Whisper model is "not measured" with the reason, never graded
+  silently and never a crash.
+- **Cross-platform (Windows, macOS, Linux):** pathlib for paths, `encoding="utf-8"` on every text file, no shell
+  commands (ffmpeg comes from `imageio-ffmpeg` and runs as an argument list), OpenCV paths through `_cv2_path`.
 - Verdict rule: any Poor → Poor; otherwise any Check → Needs review; otherwise Good. Info and not-measured rows
   never count. Issues the judge flags `may_be_recognition_error` are listed but never lower a level.
 - The pipeline reports progress only through `Progress` objects; the background thread must never call `st.*`.
@@ -115,10 +138,15 @@ data/output/             Run folders and results.json, created at run time (git-
   display, graded)` → add `r.m.<id>`, its messages and its `r.g.<id>` grading sentence to `src/report_text.py`
   in all four languages → add a test in `tests/test_report.py` (use `make_results(...)`) → update
   `docs/METRICS.md`. New result keys need no schema bump; renames/removals do.
-- **Change a threshold:** edit the constant at the top of `src/report.py`; the grading sentences read it. Update
-  the bands in `docs/METRICS.md` and `README.md`.
-- **Add a thing to check:** append an item `{start, end, category, severity, message}` in `_things_to_check`
-  (`src/report.py`), with its text in `src/report_text.py`.
+- **Change a threshold:** edit the constant at the top of `src/report.py` (or `src/intervals.py` for intervals);
+  the grading sentences read it. Update the bands in `docs/METRICS.md` and `README.md`.
+- **Add a pace rule for a language:** add `"<code>": (good, check)` to `SPEECH_RATE` in `src/report.py` (chars/s for
+  ko/ja/zh/th, words/s otherwise), a test in `tests/test_report.py`, and the band in README/METRICS.
+- **Add an interval category:** add the id → `r.cat.*` label to `CATEGORIES` in `src/intervals.py`, a collector that
+  returns `_item(...)` ranges, its texts in `src/report_text.py` (4 languages), a test in `tests/test_intervals.py`,
+  and a row in METRICS.md §7.
+- **Things to check** are built from the problem intervals (+ untimed warnings) in `_things_to_check`
+  (`src/report.py`); add new timed issues as interval categories instead.
 - **Change the translation check:** prompt and JSON schema are `SYSTEM_PROMPT` / `RESULT_SCHEMA` in
   `src/translation_judge.py`. Summary and explanations must stay four-language objects. Gemini models are tried
   in `GEMINI_MODELS` order; `GEMINI_MODEL` / `GEMINI_THINKING` env vars override the first model and thinking.
@@ -131,7 +159,7 @@ data/output/             Run folders and results.json, created at run time (git-
 1. `pytest -m "not slow"` passes (and `pytest` before committing).
 2. New user-facing text exists in en/ko/pt/es.
 3. Docs match the change (`README.md`, `docs/*.md`, this file).
-4. `git status` shows no `.env`, videos, `data/` or `tests/data/` files. Never commit videos: git keeps them in
+4. `git status` shows no `.env`, videos, `data/`, `output/` or `tests/data/` files. Never commit videos: git keeps them in
    history forever and every clone downloads them.
 5. Commit only when the user asks.
 
@@ -144,3 +172,7 @@ data/output/             Run folders and results.json, created at run time (git-
 - Google's Gemini API often returns 503 "high demand"; the judge retries and falls back across four Flash models,
   then reports "busy, try again in a minute".
 - The job registry is in memory; restarting the app during a run loses tracking.
+- Interval thresholds (long silence 2/4 s, loudness jump 10/16 dB, wrong language 50/80%) are first guesses checked on
+  the sample only. The per-window language check needs ~3 s of speech per 10 s window.
+- Compare mode was verified with fake share links (real Whisper) and in the browser; not yet on two real Perso dubs
+  of one video, and not on a real Windows machine.
