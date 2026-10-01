@@ -14,6 +14,8 @@ Audio is decoded to 16 kHz mono with the bundled ffmpeg.
 | `*_volume_stability_pct` | `(1 − std/mean RMS)·100` | Higher is steadier. Useful as a comparison, not as an absolute | 60 → 63 |
 | `*_silence_ratio` | 1 − non-silent time ÷ duration (`top_db=20`, relative to the clip's peak) | Music beds hide silence | 0.1% → 0.6% |
 
+Whisper's fallback sampling is seeded (`WHISPER_SEED`), so the same audio always gives the same transcript and scores.
+
 ## 2. Script accuracy (`score_transcript`, only when you give a script)
 
 Share links don't include a script, so this is scored only when you pass one on the command line (`--script` / `--script-file`). It isn't listed as "not measured" otherwise: it's an optional extra, not a gap.
