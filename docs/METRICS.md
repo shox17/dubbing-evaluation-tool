@@ -94,7 +94,7 @@ Share of speech time in Whisper segments with `avg_logprob ≥ −1.0` (Whisper'
 Share of dub samples at |x| ≥ 0.999. Good ≤ 0.01%, Check ≤ 0.1%.
 
 ### Speaking pace bands
-Chars/s for Korean (Good ≤ 7.5, Check ≤ 9), Japanese (≤ 8.5, ≤ 10.5), Chinese (≤ 6, ≤ 7.5); words/s for other languages (≤ 3.5, ≤ 4.5). Thai has no band and is shown as information. Rules of thumb for "the translation is too long for the time slot"; the sample dub runs at 5.8 chars/s.
+The dub language comes from the share link's metadata (base code, so `es-MX` uses the `es` rule). Chars/s for Korean (Good ≤ 7.5, Check ≤ 9), Japanese (≤ 8.5, ≤ 10.5), Chinese (≤ 6, ≤ 7.5); words/s for English (≤ 3.2, ≤ 3.8) and Spanish (≤ 3.5, ≤ 4.2). Any other language has no rule: the row is **not measured**, with the reason and the measured pace, and never counts toward the verdict. Rules of thumb for "the translation is too long for the time slot"; the sample dub runs at 5.8 chars/s.
 
 ### Video integrity (`video_integrity`)
 Resolution, frame rate, frame count and audio stream of both files (OpenCV + ffmpeg stream list). Poor if the dub can't be read or has no audio, Check if resolution or frame rate changed.

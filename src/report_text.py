@@ -217,11 +217,11 @@ REPORT_TEXT = {
         "es": "El doblaje habla muy rápido ({rate}). La traducción probablemente es demasiado larga para el tiempo "
               "disponible, así que las frases sonarán atropelladas. Una traducción más corta ayudaría.",
     },
-    "r.pace.info": {
-        "en": "There is no pace guideline for this language, so the speed ({rate}) is shown for reference only.",
-        "ko": "이 언어에는 말 속도 기준이 없어 속도({rate})를 참고용으로만 보여 줍니다.",
-        "pt": "Não há referência de ritmo para este idioma, então a velocidade ({rate}) aparece só como informação.",
-        "es": "No hay una referencia de ritmo para este idioma, así que la velocidad ({rate}) se muestra solo como dato.",
+    "r.pace.no_rule": {
+        "en": "There is no speaking-pace rule for {lang} yet, so the pace ({rate}) is not graded.",
+        "ko": "아직 이 언어({lang})의 말 속도 기준이 없어 속도({rate})를 평가하지 않습니다.",
+        "pt": "Ainda não há regra de ritmo de fala para {lang}, então o ritmo ({rate}) não é avaliado.",
+        "es": "Todavía no hay una regla de ritmo para {lang}, así que el ritmo ({rate}) no se califica.",
     },
     "r.g.pace": {
         "en": "Good up to {good} {unit}, Check up to {check} {unit}, otherwise Poor (faster than people normally speak).",

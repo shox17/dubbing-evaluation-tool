@@ -15,7 +15,7 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-from src.evaluate import CER_LANGS, SCHEMA_VERSION
+from src.evaluate import CER_LANGS, SCHEMA_VERSION, base_lang
 from src.i18n import UI_LANGUAGES, pick_ui_language, translate_message
 from src import i18n, perso_api
 from src.jobs import get_job, start_job
@@ -267,7 +267,7 @@ def render_results(r: dict):
     rep = build_report(r, st.session_state.ui_lang)
     proj = rep["project"]
     lang = p.get("target_language_code", "ko")
-    by_char = lang in CER_LANGS
+    by_char = base_lang(lang) in CER_LANGS
 
     st.title(t("results.title"), icon=":material/analytics:")
     langs = f"{proj.get('source_language') or '?'} :material/arrow_forward: {proj.get('target_language') or '?'}"

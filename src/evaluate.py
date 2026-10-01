@@ -141,7 +141,7 @@ def score_transcript(ground_truth: str, hypothesis: str, lang: str) -> dict:
     wer = float(jiwer.wer(ref, hyp)) if hyp else 1.0
     # CER ignores word boundaries, so spacing differences don't count as errors.
     cer = float(jiwer.cer(ref.replace(" ", ""), hyp.replace(" ", ""))) if hyp else 1.0
-    primary = "cer" if lang in CER_LANGS else "wer"
+    primary = "cer" if base_lang(lang) in CER_LANGS else "wer"
     error_rate = cer if primary == "cer" else wer
     return {
         "wer": round(wer, 3),
@@ -152,8 +152,14 @@ def score_transcript(ground_truth: str, hypothesis: str, lang: str) -> dict:
     }
 
 
-def whisper_language(code: str) -> Optional[str]:
+def base_lang(code: Optional[str]) -> str:
+    """The base language of a code: "es-MX" -> "es", "zh_CN" -> "zh", None -> ""."""
+    return (code or "").replace("_", "-").split("-")[0].strip().lower()
+
+
+def whisper_language(code: Optional[str]) -> Optional[str]:
     """Whisper's code for a Perso language code, or None when Whisper has no model for it."""
+    code = base_lang(code)
     code = WHISPER_CODE_ALIASES.get(code, code)
     return code if code in whisper.tokenizer.LANGUAGES else None
 
@@ -464,7 +470,7 @@ def speech_rate(text: str, speaking_sec: float, lang: str) -> Optional[dict]:
     norm = normalize_text(text)
     if not norm or speaking_sec <= 0:
         return None
-    if lang in CER_LANGS:
+    if base_lang(lang) in CER_LANGS:
         count, unit = len(norm.replace(" ", "")), "chars/s"
     else:
         count, unit = len(norm.split()), "words/s"

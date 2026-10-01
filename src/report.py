@@ -11,7 +11,7 @@ import math
 import textwrap
 from typing import Callable, Optional
 
-from src.evaluate import CER_LANGS, whisper_language
+from src.evaluate import base_lang, whisper_language
 from src.i18n import DEFAULT_UI_LANGUAGE, t as i18n_t
 
 # Thresholds, in one place so the report can print exactly what it applied.
@@ -19,7 +19,8 @@ LENGTH_PCT = (5.0, 15.0)                 # |dub - original| / original
 LOUDNESS_DB = (2.0, 4.0)                 # |20 log10(rms ratio)|
 SILENCE_PTS = (5.0, 15.0)                # extra silence in the dub, percentage points
 CLIPPING_PCT = (0.01, 0.1)               # share of samples at full scale
-SPEECH_RATE = {"ko": (7.5, 9.0), "ja": (8.5, 10.5), "zh": (6.0, 7.5), "words": (3.5, 4.5)}
+# Speaking pace per dub language: chars/s for ko/ja/zh, words/s for en/es. A language without a rule is not graded.
+SPEECH_RATE = {"ko": (7.5, 9.0), "ja": (8.5, 10.5), "zh": (6.0, 7.5), "en": (3.2, 3.8), "es": (3.5, 4.2)}
 CLARITY_PCT = (90.0, 70.0)               # speech time Whisper recognised confidently
 LANGUAGE_PROB = 0.5                      # below this the language guess is uncertain
 OVERLAP_PCT = (75.0, 55.0)               # speech-timing overlap; a real Perso EN→KO dub scores ~81%
@@ -73,7 +74,7 @@ def _local(value, lang: str) -> str:
 
 
 # ---------------- sections ----------------
-def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str) -> list[dict]:
+def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str, lang_name: str) -> list[dict]:
     """Length, loudness, silence, distortion and speaking pace."""
     rows = []
     od, dd = ac["original_duration_sec"], ac["dubbed_duration_sec"]
@@ -120,21 +121,22 @@ def _timing_audio(tr: Tr, ac: dict, sr: dict, lang: str) -> list[dict]:
         rows.append(_metric(tr, "clipping", level, msg, clip, f"{clip:.3f}%",
                             tr("r.g.clipping", good=f"{CLIPPING_PCT[0]:g}", check=f"{CLIPPING_PCT[1]:g}")))
 
-    rate = sr.get("dubbed_speech_rate")
-    key = lang if lang in CER_LANGS else "words"
-    if rate:
-        unit = tr(f"unit.{rate['unit']}")
-        shown = f"{rate['value']:.1f} {unit}"
-        if key in SPEECH_RATE:
-            bands = SPEECH_RATE[key]
-            level = _band_max(rate["value"], bands)
-            rows.append(_metric(tr, "speech_rate", level, tr(f"r.pace.{level}", rate=shown), rate["value"], shown,
-                                tr("r.g.pace", good=f"{bands[0]:g}", check=f"{bands[1]:g}", unit=unit)))
-        else:
-            rows.append(_metric(tr, "speech_rate", "info", tr("r.pace.info", rate=shown), rate["value"], shown))
-    else:
-        rows.append(_na(tr, "speech_rate", tr("r.no_speech")))
+    rows.append(_pace(tr, sr.get("dubbed_speech_rate"), lang, lang_name))
     return rows
+
+
+def _pace(tr: Tr, rate: Optional[dict], lang: str, lang_name: str) -> dict:
+    """Speaking pace of the dub, graded only for languages with a pace rule (SPEECH_RATE)."""
+    if not rate:
+        return _na(tr, "speech_rate", tr("r.no_speech"))
+    unit = tr(f"unit.{rate['unit']}")
+    shown = f"{rate['value']:.1f} {unit}"
+    bands = SPEECH_RATE.get(base_lang(lang))
+    if not bands:
+        return _na(tr, "speech_rate", tr("r.pace.no_rule", lang=lang_name or lang or "?", rate=shown))
+    level = _band_max(rate["value"], bands)
+    return _metric(tr, "speech_rate", level, tr(f"r.pace.{level}", rate=shown), rate["value"], shown,
+                   tr("r.g.pace", good=f"{bands[0]:g}", check=f"{bands[1]:g}", unit=unit))
 
 
 def _speech(tr: Tr, sr: dict, lang: str, lang_name: str) -> list[dict]:
@@ -324,13 +326,14 @@ def build_report(r: dict, lang: str = DEFAULT_UI_LANGUAGE) -> dict:
     tr: Tr = lambda key, **p: i18n_t(key, lang, **p)
     ac, sr = r["acoustic_metrics"], r["speech_recognition"]
     project = _project(r)
-    code = project["target_language_code"] or "ko"
+    code = project["target_language_code"] or ""
+    lang_name = project["target_language"] or code
     tj = r.get("translation_judge")
     if project["evaluated_video"]:
         project["evaluated_video"] = tr("r.evaluated." + ("lipsync" if project["is_lipsync"] else "dub"))
     sections = [
-        {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code)},
-        {"id": "speech", "metrics": _speech(tr, sr, code, project["target_language"] or code)},
+        {"id": "timing_audio", "metrics": _timing_audio(tr, ac, sr, code, lang_name)},
+        {"id": "speech", "metrics": _speech(tr, sr, code, lang_name)},
         {"id": "alignment", "metrics": _alignment(tr, r.get("timing_alignment") or {})},
         {"id": "translation", "metrics": _translation(tr, tj, lang), "note": tr("r.note.translation")},
         {"id": "integrity", "metrics": _integrity(tr, r.get("video_integrity"))},

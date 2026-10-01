@@ -105,6 +105,8 @@ Full detail in [METRICS.md](docs/METRICS.md).
 | Loudness match | within ±2 dB | within ±4 dB | beyond |
 | Extra silence in the dub | ≤ 5 pts | ≤ 15 pts | above |
 | Speaking pace (Korean) | ≤ 7.5 chars/s | ≤ 9 | above |
+| Speaking pace (English) | ≤ 3.2 words/s | ≤ 3.8 | above |
+| Speaking pace (Spanish) | ≤ 3.5 words/s | ≤ 4.2 | above |
 | Dub language | matches | unsure | different |
 | Voice clarity | ≥ 90% | ≥ 70% | below |
 | Speech timing overlap | ≥ 75% | ≥ 55% | below |
