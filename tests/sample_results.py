@@ -43,7 +43,7 @@ BASE = {
         "run_id": "r1", "execution_mode": "Perso share link (lip-synced video)", "input_video_path": "o.mp4",
         "dubbed_video_path": "d.mp4", "target_language_name": "Korean", "target_language_code": "ko",
         "target_language_id": "ko",
-        "share": {"share_url": "https://perso.ai/en/share/video-translator?seq=abc", "seq": 420891,
+        "share": {"share_url": "https://perso.ai/en/share/video-translator?seq=abc", "seq": 100001,
                   "title": "QA sample.mp4 → ko", "source_language_name": "English (US)", "source_language_code": "en",
                   "target_language_name": "Korean", "is_lipsync": True, "evaluated_video": "lip-synced",
                   "duration_ms": 28683, "created": "2026-09-26"},

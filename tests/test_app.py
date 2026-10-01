@@ -58,7 +58,7 @@ def test_share_link_shows_project_preview_and_enables_start(shared):
     assert not at.exception
     text = all_text(at)
     assert "QA sample.mp4 → ko" in text and "**Languages:** English (US) → Korean" in text
-    assert "**Length:** 28.7 s" in text and "**Lip-sync:** Yes" in text and "**Perso project:** #420891" in text
+    assert "**Length:** 28.7 s" in text and "**Lip-sync:** Yes" in text and "**Perso project:** #100001" in text
     assert "**Videos in the link:** original, dubbed, lip-synced" in text
     for removed in ("spends no Perso credits", "Lip movement is measured automatically", "checked automatically with"):
         assert removed not in text

@@ -22,7 +22,7 @@ def test_good_dub_gets_good_verdict_and_every_row_explains_itself():
             if m["level"] in ("good", "check", "poor"):
                 assert m["thresholds"], f"{m['id']} must print the thresholds it used"
     assert metric(rep, "language")["display"] == "Korean (99% sure)"
-    assert rep["project"]["perso_seq"] == 420891 and rep["project"]["evaluated_video"] == "lip-synced video"
+    assert rep["project"]["perso_seq"] == 100001 and rep["project"]["evaluated_video"] == "lip-synced video"
 
 
 def test_one_poor_metric_makes_the_verdict_poor():
@@ -117,7 +117,7 @@ def test_renderers_show_verdict_sections_and_things_to_check():
     rep = build_report(r)
     text = render_text(rep)
     assert "OVERALL:  ✅  GOOD" in text and "3. TIMING ALIGNMENT" in text and "00:19.4–00:20.1" in text
-    assert "Perso #420891" in text and "NOT MEASURED" in text
+    assert "Perso #100001" in text and "NOT MEASURED" in text
     page = render_html(rep, r, "original.mp4", "dubbed_ko.mp4")
     assert page.startswith("<!doctype html>") and "prefers-color-scheme:dark" in page
     assert "<video" in page and "Speech timeline" in page and "Things to check" in page

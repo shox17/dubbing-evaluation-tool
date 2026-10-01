@@ -1,7 +1,7 @@
 # Evaluation Metrics
 
 This page explains how each score is produced (`src/evaluate.py`), how to read it, and where it breaks down.
-Reference numbers ("Sample") come from a real Perso EN→KO lip-sync dub of a 28.7 s talking-head clip (share project #420891), Whisper `small`. The default model is now `base`, which gave the same verdict and scores on this sample (82% vs 81% speech overlap, 4/5 meaning) with a 3× smaller download.
+Reference numbers ("Sample") come from a real Perso EN→KO lip-sync dub of a 28.7 s talking-head clip, Whisper `small`. The default model is now `base`, which gave the same verdict and scores on this sample (82% vs 81% speech overlap, 4/5 meaning) with a 3× smaller download.
 
 ## 1. Acoustics (`analyze_acoustics`)
 

@@ -46,13 +46,13 @@ def test_server_errors_are_retried_then_succeed():
             return FakeResponse(status, {"message": "busy"})
         return real(method, url, **kw)
     fake.request = flaky
-    assert get_shared_project(SHARE_TOKEN, session=fake, sleep=NO_SLEEP)["seq"] == 420891
+    assert get_shared_project(SHARE_TOKEN, session=fake, sleep=NO_SLEEP)["seq"] == 100001
 
 
 def test_shared_project_needs_no_api_key():
     fake = FakePerso()
     project = get_shared_project(SHARE_TOKEN, session=fake, sleep=NO_SLEEP)
-    assert project["seq"] == 420891
+    assert project["seq"] == 100001
     assert fake.calls[0][1] == f"/video-translator/api/v1/projects/shared/{SHARE_TOKEN}"
 
 
@@ -98,7 +98,7 @@ def test_share_pipeline_flow(isolated_output, monkeypatch):
     assert stages[0] == "fetch" and "download" in stages and stages[-1] == "evaluate"
 
     p = r["pipeline"]
-    assert p["share"]["evaluated_video"] == "lip-synced" and p["share"]["seq"] == 420891
+    assert p["share"]["evaluated_video"] == "lip-synced" and p["share"]["seq"] == 100001
     assert r["translation_judge"]["measured"] is False
     assert r["report"]["overall"]["level"] in ("good", "check", "poor")
     for path in p["report_files"].values():

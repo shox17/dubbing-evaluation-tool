@@ -3,18 +3,18 @@ import json
 from typing import Optional
 
 
-SHARE_TOKEN = "OLsXYhJq6w7e1JrYyktTikpSOCfX5m6qI_J2JFTEKUGK6SqErnVlVcINSX-CfLYj"
+SHARE_TOKEN = "TESTshareTOKENaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 SHARE_URL = f"https://perso.ai/en/share/video-translator?seq={SHARE_TOKEN}"
 
-# Shape of GET /projects/shared/{token}, copied from a real response (paths shortened).
+# Shape of GET /projects/shared/{token}, the real response shape (placeholder values).
 SHARED_PROJECT = {
-    "seq": 420891, "title": "QA sample.mp4 → ko", "projectType": "VIDEO", "userName": "uz*****80", "durationMs": 28683,
+    "seq": 100001, "title": "QA sample.mp4 → ko", "projectType": "VIDEO", "userName": "te*****01", "durationMs": 28683,
     "sourceLanguage": {"code": "en", "name": "English (US)", "languageTag": "default", "experiment": False},
     "targetLanguage": {"code": "ko", "name": "Korean", "languageTag": "default", "experiment": False},
     "thumbnailUrl": "/perso-storage/u/2026_09/original/thumb.webp",
     "originalFileUrl": "/perso-storage/u/2026_09/original/original video.mp4",
-    "translatedFileUrl": "/perso-storage/u/2026_09/p-420890/QA_ko_TranslatedVideo.mp4",
-    "lipSyncFileUrl": "/perso-storage/u/2026_09/p-420891/QA_ko_Lip-syncedVideo.mp4",
+    "translatedFileUrl": "/perso-storage/u/2026_09/p-100000/QA_ko_TranslatedVideo.mp4",
+    "lipSyncFileUrl": "/perso-storage/u/2026_09/p-100001/QA_ko_Lip-syncedVideo.mp4",
     "isLipSync": True,
 }
 

@@ -22,7 +22,7 @@ The dubbing path was removed: the Perso account client (upload, dubbing, lip-syn
 
 ## Verification performed
 - `pytest`: all pass.
-- **Real share link, end to end** (read-only, no credits): a Perso EN→KO lip-sync project (#420891, 28.7 s). CLI and app both produced the report in ~45 s: Good, 81% speech overlap with two short dub-only spots, Korean detected at 99%, 100% clarity, identical length and loudness, 1920×1080 @ 60 fps preserved.
+- **Real share link, end to end** (read-only, no credits): a Perso EN→KO lip-sync project (28.7 s). CLI and app both produced the report in ~45 s: Good, 81% speech overlap with two short dub-only spots, Korean detected at 99%, 100% clarity, identical length and loudness, 1920×1080 @ 60 fps preserved.
 - **Gemini translation check, live** on the same project: `gemini-3.5-flash` scored the dub 4/5 in ≈ 3 s and flagged "이나데아크" and "고맙나요" as probable recognition errors. Gemini returned 503 ("high demand") on one early attempt, which is why the judge retries and falls back to a second model.
 - **Not verified live:** the Claude path (no Anthropic key on the development machine); covered by tests with a fake client.
 
