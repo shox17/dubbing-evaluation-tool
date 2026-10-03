@@ -13,17 +13,30 @@ python qa.py compare "<link A>" "<link B>" --out ./output --lang ko
 
 Works with any language pair, with or without lip-sync, on Windows, macOS and Linux.
 
+### What you can do with it
+| Way | How | What for |
+|---|---|---|
+| **Web app** | `streamlit run app.py` | Paste a link, watch progress, read the report, jump to each problem in the video |
+| **Command line** | `python qa.py "<link>"` | A report in the terminal plus saved files |
+| **Compare** | `python qa.py compare A B C …` or the app's **Compare two dubs** tab | Rank 2–8 dubs of the same video and pick the one to deliver |
+| **Batch** | `python qa.py batch links.txt` | Check many links at once; one summary spreadsheet, and agreement with your own verdicts |
+| **History & feedback** | the app's **History** page, `qa.py history`, `qa.py feedback` | Trends over time, and which checks reviewers say raise false alarms |
+| **REST API** | `python qa.py serve` | Let other tools start evaluations and fetch reports |
+| **Docker** | `docker compose up` | Everything in one container, models included (works offline) |
+
+### What it checks
 | Section | What it checks | How |
 |---|---|---|
 | **Timing & audio** | Same length? Same loudness? Unusual gaps? Distortion? Rushed speech? | `librosa` on both tracks: duration, RMS loudness (dB), silence, clipping, chars/words per second |
-| **Speech recognition** | Is the dub in the right language? Is the voice clear? Does it sound clean, not robotic or distorted? | Whisper language detection, the share of speech Whisper recognises confidently, a voice-quality model (DNSMOS P.835) comparing the dub with the original at the same moments, and a speaker-recognition model checking the dub voice still sounds like each original speaker (lines with a quiet background only) |
+| **Speech** | Is the dub in the right language? Is the voice clear? | Whisper language detection, and the share of speech Whisper recognises confidently |
+| **Voice** | Does the voice sound clean, not robotic or distorted? Does it still sound like the original speaker? | A voice-quality model (DNSMOS P.835) comparing the dub with the original at the same moments, and a speaker-recognition model (WeSpeaker) comparing each original line with the dub (lines with a quiet background only) |
 | **Timing alignment** | Does the dub speak when the original speaks? | Whisper word timings of both tracks → overlap of speech (IoU) and the places where only one track speaks |
 | **Translation** *(automatic when a key is set)* | Same meaning? Anything missing or added? Names and numbers kept? | Gemini (or Claude) compares the two timestamped transcripts (needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) |
 | **Video integrity** | Is the picture unchanged, with an audio track? | Resolution, frame rate and audio stream of both files |
 | **Lip movement** *(experimental, lip-synced dubs only)* | Does the mouth move with the voice? | MediaPipe mouth opening vs loudness, compared with the original; measured automatically when the dub is lip-synced; never part of the verdict |
 | **Script accuracy** *(CLI, when you pass a script)* | Is the script you expected heard in the dub? | Whisper transcript vs your script: CER for Korean, Japanese, Chinese and Thai, WER otherwise |
 
-Every run saves `report.html` (a standalone page to share), `report.json` and `report.txt` in the `--out` folder (default `./output`). Compare mode saves `comparison.txt` / `.json` / `.html` plus `report_A.*` and `report_B.*`.
+Every run saves `report.html` (a standalone page to share), `report.json` and `report.txt` in the `--out` folder (default `./output`). Compare mode saves `comparison.txt` / `.json` / `.html` plus `report_A.*`, `report_B.*`, … (one per dub).
 
 ---
 
@@ -32,16 +45,21 @@ Every run saves `report.html` (a standalone page to share), `report.json` and `r
 ```
  share link ─► GET /projects/shared/{seq}   (public: no key, no credits)
             ─► download the original + the dub (the lip-synced one when there is one)
-            ─► measure on your machine: audio · Whisper (language, clarity, timing) · file check · lip movement
+            ─► measure on your machine: audio · Whisper (language, clarity, timing) · voice quality · voice similarity
+                                        · file check · lip movement (lip-synced dubs)
             ─► translation check on both transcripts (Gemini, or Claude), automatic when a key is set
             ─► report: verdict · sections · problem intervals  →  report.html / report.json / report.txt
+            ─► recorded in the history (data/history.jsonl)
 
- compare: link A + link B ─► the pipeline above for each ─► decision rule ─► comparison.txt / .json / .html
+ compare: links A, B, … (2–8) ─► the pipeline above for each ─► decision rule ─► comparison.txt / .json / .html
+ batch:   a file of links      ─► the pipeline above for each ─► summary.csv / .txt / .json
+ API:     POST /evaluations · /comparisons ─► the same pipeline as a background job ─► GET /jobs/{id}
 ```
 
 - **Verdict rule:** any Poor → **Poor**; otherwise any Check → **Needs review**; otherwise **Good**. Informational and not-measured items don't count, and are listed with the reason.
 - **Downloads, speech recognition and the translation review are cached per share link** (`data/cache/`), so a rerun of the same link takes seconds and costs no API call. `--no-cache` redoes the downloads and speech recognition; a failed translation review is never cached.
-- In the app the work runs in a **background thread**, so reloading the page is safe: the job id in the URL reattaches to it.
+- **Repeatable:** the same dub always gets the same scores (the speech recognizer's random sampling is fixed), so a change in the report means the dub or the tool changed, not chance.
+- In the app the work runs in a **background thread**, so reloading the page is safe: the job id in the URL reattaches to it, and finished results survive an app restart.
 - All measuring (Whisper, MediaPipe, audio) happens **on your machine**. Only the translation check sends the two transcripts (text, not audio) to Gemini or Claude.
 
 More detail: [Architecture](docs/ARCHITECTURE.md) · [Metrics and score bands](docs/METRICS.md) · [Engineering review](docs/ENGINEERING_REVIEW.md)
@@ -92,6 +110,24 @@ In Perso, open the dubbed video, choose **Share**, and copy the link. It looks l
 2. The **translation is checked automatically** when `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) is set; the preview says which model will be used. There are no options to set. To also score an approved script, use the command line (`--script` / `--script-file`).
 3. Press **Evaluate this dub**.
 4. The results page shows the **verdict**, both videos side by side, the six report **sections** with a speech timeline chart, and **things to check**; each ▶ button starts both videos at that moment. **Detailed measurements** (table, loudness chart, transcripts) are below. Download **Report (HTML)** or **Data (JSON)**.
+
+### Problem intervals
+Every issue in the report is a time range you can jump to, with its category, severity (Poor or Check), the check that found it and a one-line description, e.g. `12.4s-15.1s | missing speech | Poor | Translation check | the line about … is not spoken`. Overlapping or nearby ranges of the same kind are merged.
+
+| Category | Means |
+|---|---|
+| long silence | the original speaks for 2 s or more but the dub is silent |
+| timing | only one of the two tracks speaks for a moment |
+| missing / added speech | the translation check found content left out or invented |
+| mistranslation · name or number | the translation check found a wrong meaning, name or number |
+| distortion | the dub's audio clips |
+| loudness jump | the dub is much louder or quieter than the original at that moment |
+| wrong language | this part sounds like another language, or like the original's (the original voice may be left in) |
+| clarity | speech recognition couldn't understand the dub there |
+| voice quality | the dub's voice sounds clearly worse (robotic, distorted) than the original's there |
+| different voice | this line's voice doesn't match the original speaker while the rest of the dub does |
+
+Probable speech-recognition mistakes are listed separately as "possible ASR error" and never count. Mark each interval 👍 or 👎 in the app (see Reviewer feedback below).
 
 **Interface language:** English, 한국어, Português or Español (sidebar). Everything follows it: the report's explanations, verdict and things to check, Gemini's translation comments, error messages, and the downloaded HTML report. The command line takes `--lang ko` (the default), `en`, `es` or `pt`.
 
@@ -233,7 +269,12 @@ CLAUDE.md                Imports AGENTS.md for Claude Code
 - If you rename or remove keys in the results, bump `SCHEMA_VERSION` in `src/evaluate.py` and `RESULTS_SCHEMA_VERSION` in `app.py`.
 
 ### Ideas for next steps
-Open items are tracked in [docs/ENGINEERING_REVIEW.md](docs/ENGINEERING_REVIEW.md). The biggest ones are replacing the experimental lip-sync measure with a SyncNet-style model and calibrating the new bands on more dubs.
+Open items are tracked in [docs/ENGINEERING_REVIEW.md](docs/ENGINEERING_REVIEW.md). In order of value:
+1. **Calibrate on real dubs:** label 30–50 Perso dubs by ear and run `qa.py batch`; a `qa.py calibrate` command that suggests thresholds from those labels and the 👍/👎 votes.
+2. **Close known gaps:** detect a muffled voice; re-transcribe flagged lines with a bigger Whisper model before the translation check; separate voice from music (for films) once the dependencies allow.
+3. **A real lip-sync model** (SyncNet-style) instead of the experimental heuristic.
+4. **Team features:** shareable review links, alerts when a batch finds a Poor dub, scheduled re-checks.
+5. **Engineering:** a smaller Docker image, GPU when available, SQLite for history and votes, published releases.
 
 ---
 
@@ -262,6 +303,15 @@ CPU only (PyTorch CPU wheels), runs as a non-root user, Whisper and the speaker 
 
 ## Continuous integration
 `.github/workflows/tests.yml` runs the fast, offline suite on **Linux, macOS and Windows** (Python 3.14) for every push and pull request. No secrets are needed.
+
+## Known limits
+- **Thresholds are calibrated on only a few real dubs.** Treat borderline results with care, and use labelled batches and 👍/👎 votes to tune them.
+- **Background music makes voice checks harder:** on music-heavy videos voice similarity is not measured (by design), and speech timing and clarity are noisier.
+- **Voice quality doesn't detect a muffled voice.**
+- **Lip movement is a rough heuristic:** shown for information only, never part of the verdict.
+- **The translation check reads transcripts, not audio:** a misheard word can look like a translation error (the report marks probable mishearings). It needs a Gemini or Claude key; Gemini is sometimes overloaded, in which case the check is reported as not measured and you can run again later.
+- **Speaking pace** is graded for Korean, English, Spanish, Japanese and Chinese only; other languages show "not measured".
+- **A job running when the app restarts can't resume**; it's reported as interrupted.
 
 ## Troubleshooting
 
